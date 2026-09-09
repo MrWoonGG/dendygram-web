@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>DendyGram</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <!-- PeerJS для надійного P2P WebRTC зв'язку між гравцями -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <style>
     * {
       box-sizing: border-box;
@@ -72,7 +74,39 @@
       height: 100% !important;
     }
 
-    /* Ховаємо вбудовані елементи EmulatorJS: налаштування, тулбари, віртуальні тач-кнопки */
+    /* Екран очікування підключення */
+    #waiting-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: #09090b;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      color: #fafafa;
+      text-align: center;
+      padding: 20px;
+    }
+
+    .spinner {
+      width: 38px;
+      height: 38px;
+      border: 3px solid rgba(255,255,255,0.1);
+      border-top-color: #38bdf8;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 14px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Приховування зайвих оверлеїв налаштувань EmulatorJS */
     #game * [class*="ejs_"],
     #game * [id*="controls"],
     #game * [id*="gamepad"],
@@ -207,6 +241,11 @@
     <div class="screen-bezel">
       <div id="game-container">
         <div id="game"></div>
+        <div id="waiting-overlay">
+          <div class="spinner"></div>
+          <div style="font-weight: 700; font-size: 14px; margin-bottom: 6px;">ОЧІКУЄМО ХОСТА...</div>
+          <div style="color: #71717a; font-size: 11px;">Player 1 ще не запустив гру. Зачекай хвилинку!</div>
+        </div>
       </div>
       <div class="brand">DENDYGRAM • PORTABLE</div>
     </div>
@@ -261,12 +300,19 @@
     const playerNum = parseInt(hashParams.get('player') || urlParams.get('player') || '1', 10);
 
     const brandElem = document.querySelector('.brand');
+    const waitingOverlay = document.getElementById('waiting-overlay');
+
     if (roomId && brandElem) {
       brandElem.textContent = `DENDYGRAM • DUO (P${playerNum})`;
       brandElem.style.color = playerNum === 1 ? '#38bdf8' : '#34d399';
     }
 
-    if (targetRom) {
+    let isEmulatorStarted = false;
+    function startEmulator() {
+      if (isEmulatorStarted || !targetRom) return;
+      isEmulatorStarted = true;
+      waitingOverlay.style.display = 'none';
+
       try {
         if (!targetRom.startsWith('http')) {
           targetRom = decodeBase64Url(targetRom);
@@ -284,32 +330,75 @@
       window.EJS_startOnLoaded = true;
       window.EJS_alignStartButton = false;
       window.EJS_disableToolbar = true;
-
-      // Вимикаємо екранний віртуальний геймпад емулятора для мобілок
       window.EJS_VirtualGamepadSettings = [0, 0];
       window.EJS_mouse = false;
-
-      if (roomId) {
-        window.EJS_netplayUrl = 'wss://netplay.emulatorjs.org';
-        window.EJS_gameId = roomId;
-      }
 
       const loader = document.createElement('script');
       loader.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
       document.body.appendChild(loader);
     }
 
-    const keyMap = {
-      ArrowUp:    { key: 'ArrowUp',    code: 'ArrowUp',    keyCode: 38 },
-      ArrowDown:  { key: 'ArrowDown',  code: 'ArrowDown',  keyCode: 40 },
-      ArrowLeft:  { key: 'ArrowLeft',  code: 'ArrowLeft',  keyCode: 37 },
-      ArrowRight: { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 },
-      KeyX:       { key: 'x',          code: 'KeyX',       keyCode: 88 },
-      KeyZ:       { key: 'z',          code: 'KeyZ',       keyCode: 90 },
-      Enter:      { key: 'Enter',      code: 'Enter',      keyCode: 13 },
-      ShiftLeft:  { key: 'Shift',      code: 'ShiftLeft',  keyCode: 16 }
-    };
+    // P2P Мережева синхронізація через PeerJS
+    let peer = null;
+    let dataConnection = null;
 
+    if (roomId) {
+      const peerRoomId = `dendygram_room_${roomId}`;
+
+      if (playerNum === 1) {
+        // ХОСТ: реєструє кімнату й одразу стартує гру
+        peer = new Peer(peerRoomId);
+        startEmulator();
+
+        peer.on('connection', (conn) => {
+          dataConnection = conn;
+          brandElem.textContent = "DENDYGRAM • DUO CONNECTED!";
+          brandElem.style.color = "#22c55e";
+
+          // Прийом інпутів від Player 2
+          conn.on('data', (data) => {
+            if (data && data.btnId !== undefined) {
+              try {
+                window.EJS_emulator?.controls?.simulateButton(1, data.btnId, data.val);
+              } catch (e) {}
+            }
+          });
+        });
+      } else {
+        // PLAYER 2: підключається до хоста. Якщо хоста нема — екран очікування
+        waitingOverlay.style.display = 'flex';
+        peer = new Peer();
+
+        function connectToHost() {
+          const conn = peer.connect(peerRoomId, { reliable: true });
+          dataConnection = conn;
+
+          conn.on('open', () => {
+            console.log("Підключено до хоста!");
+            startEmulator();
+          });
+
+          conn.on('close', () => {
+            waitingOverlay.style.display = 'flex';
+          });
+        }
+
+        peer.on('open', () => {
+          connectToHost();
+        });
+
+        peer.on('error', (err) => {
+          console.warn("Очікуємо підключення хоста...", err);
+          // Повторна спроба підключення кожні 3 секунди
+          setTimeout(connectToHost, 3000);
+        });
+      }
+    } else {
+      // Соло гра
+      startEmulator();
+    }
+
+    // Обробка керування
     const ejsBtnMap = {
       KeyZ: 0,
       KeyX: 8,
@@ -323,48 +412,26 @@
 
     function triggerKey(code, type) {
       const isDown = (type === 'keydown');
-      const portIndex = playerNum === 2 ? 1 : 0;
+      const val = isDown ? 1 : 0;
+      const btnId = ejsBtnMap[code];
 
+      if (roomId && playerNum === 2) {
+        // P2 шле інпут хосту по WebRTC і натискає в себе
+        if (dataConnection && dataConnection.open && btnId !== undefined) {
+          dataConnection.send({ btnId, val });
+        }
+        try {
+          window.EJS_emulator?.controls?.simulateButton(1, btnId, val);
+        } catch (e) {}
+        return;
+      }
+
+      // Для соло або хоста P1
       try {
-        if (window.EJS_emulator?.controls?.simulateButton) {
-          const btnId = ejsBtnMap[code];
-          if (btnId !== undefined) {
-            window.EJS_emulator.controls.simulateButton(portIndex, btnId, isDown ? 1 : 0);
-            return;
-          }
+        if (window.EJS_emulator?.controls?.simulateButton && btnId !== undefined) {
+          window.EJS_emulator.controls.simulateButton(0, btnId, val);
         }
       } catch (err) {}
-
-      const meta = keyMap[code];
-      if (!meta) return;
-
-      const ev = new KeyboardEvent(type, {
-        key: meta.key,
-        code: meta.code,
-        keyCode: meta.keyCode,
-        which: meta.keyCode,
-        bubbles: true,
-        cancelable: true,
-        composed: true,
-        view: window
-      });
-      Object.defineProperty(ev, 'keyCode', { get: () => meta.keyCode });
-      Object.defineProperty(ev, 'which', { get: () => meta.keyCode });
-
-      const targets = [
-        document.querySelector('#game canvas'),
-        document.querySelector('canvas'),
-        document.getElementById('game'),
-        window,
-        document
-      ];
-
-      for (const target of targets) {
-        if (target) {
-          if (typeof target.focus === 'function') target.focus();
-          target.dispatchEvent(ev);
-        }
-      }
     }
 
     document.querySelectorAll('[data-key]').forEach(elem => {
