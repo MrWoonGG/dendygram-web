@@ -4,7 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>DendyGram</title>
-  <!-- Telegram WebApp SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
     * {
@@ -204,7 +203,6 @@
 
     <div class="controls">
       <div class="main-pads">
-        <!-- D-PAD -->
         <div class="dpad">
           <div class="dpad-center"></div>
           <div class="dpad-btn dpad-up" data-key="ArrowUp"></div>
@@ -213,14 +211,12 @@
           <div class="dpad-btn dpad-right" data-key="ArrowRight"></div>
         </div>
 
-        <!-- B / A -->
         <div class="action-buttons">
           <div class="action-btn" data-key="KeyZ">B</div>
           <div class="action-btn" data-key="KeyX">A</div>
         </div>
       </div>
 
-      <!-- Select / Start -->
       <div class="system-pads">
         <div class="sys-btn-wrap">
           <div class="sys-btn" data-key="ShiftLeft"></div>
@@ -235,50 +231,28 @@
   </div>
 
   <script>
-    // Ініціалізація Telegram WebApp
     const tg = window.Telegram?.WebApp;
     if (tg) {
       tg.expand();
       tg.ready();
     }
 
-    // Декодування base64url від grammY бота
-    function decodeBase64Url(str) {
-      str = str.replace(/-/g, '+').replace(/_/g, '/');
-      while (str.length % 4) {
-        str += '=';
-      }
-      return decodeURIComponent(escape(atob(str)));
-    }
-
-    // Отримання ROM посилання зі start_param або параметрів URL
+    // Парсинг лінка з хешу #rom= або query-параметра ?rom=
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
     const urlParams = new URLSearchParams(window.location.search);
-    const startAppParam = tg?.initDataUnsafe?.start_param || urlParams.get('tgWebAppStartParam') || urlParams.get('startapp');
 
-    let gameRomUrl = '';
-    if (startAppParam) {
-      try {
-        gameRomUrl = decodeBase64Url(startAppParam);
-      } catch (err) {
-        console.error('Помилка парсингу картриджа:', err);
-      }
-    }
+    const targetRomUrl = hashParams.get('rom') || urlParams.get('rom') || urlParams.get('game');
 
-    // Дефолтний бекап, якщо запустили не через бота
-    if (!gameRomUrl) {
-      gameRomUrl = 'roms/game.nes';
-    }
-
-    // Налаштування EmulatorJS
+    // Налаштування емулятора
     window.EJS_player = '#game';
     window.EJS_core = 'nes';
-    window.EJS_gameUrl = gameRomUrl;
+    window.EJS_gameUrl = targetRomUrl ? decodeURIComponent(targetRomUrl) : 'roms/game.nes';
     window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
     window.EJS_startOnLoaded = true;
     window.EJS_alignStartButton = false;
     window.EJS_disableToolbar = true;
 
-    // Мапа кнопок для браузерних KeyboardEvent
+    // Мапа кнопок для емулятора
     const keyMap = {
       ArrowUp:    { key: 'ArrowUp',    code: 'ArrowUp',    keyCode: 38 },
       ArrowDown:  { key: 'ArrowDown',  code: 'ArrowDown',  keyCode: 40 },
@@ -290,7 +264,6 @@
       ShiftLeft:  { key: 'Shift',      code: 'ShiftLeft',  keyCode: 16 }
     };
 
-    // Індекси RetroArch: 0: B, 2: SELECT, 3: START, 4: UP, 5: DOWN, 6: LEFT, 7: RIGHT, 8: A
     const ejsBtnMap = {
       KeyZ: 0,
       KeyX: 8,
@@ -305,9 +278,8 @@
     function triggerKey(code, type) {
       const isDown = (type === 'keydown');
 
-      // 1. Прямий виклик API ядра RetroArch
       try {
-        if (window.EJS_emulator && window.EJS_emulator.controls && typeof window.EJS_emulator.controls.simulateButton === 'function') {
+        if (window.EJS_emulator?.controls?.simulateButton) {
           const btnId = ejsBtnMap[code];
           if (btnId !== undefined) {
             window.EJS_emulator.controls.simulateButton(0, btnId, isDown ? 1 : 0);
@@ -316,7 +288,6 @@
         }
       } catch (err) {}
 
-      // 2. Фолбек-івенти для Canvas
       const meta = keyMap[code];
       if (!meta) return;
 
@@ -351,7 +322,6 @@
       }
     }
 
-    // Підключення Pointer Events з легким вібро-відгуком у стилі Taptic
     document.querySelectorAll('[data-key]').forEach(elem => {
       const code = elem.getAttribute('data-key');
 
