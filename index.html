@@ -1,185 +1,234 @@
 <!DOCTYPE html>
 <html lang="uk">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>DendyGram Retro Console</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>DendyGram</title>
+  <!-- Telegram WebApp SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
     * {
       box-sizing: border-box;
-      user-select: none;
+      -webkit-touch-callout: none;
       -webkit-user-select: none;
-      touch-action: manipulation;
+      user-select: none;
     }
-    body, html {
+
+    body {
       margin: 0;
-      padding: 0;
-      width: 100%;
-      height: 100%;
-      background-color: #1a1a1a;
+      background: #121214;
       display: flex;
       justify-content: center;
       align-items: center;
-      font-family: sans-serif;
+      height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
       overflow: hidden;
     }
-    /* Корпус консолі під колір Dendy Classic */
-    .console-body {
+
+    /* Корпус кишенькової консолі */
+    .console {
       width: 100%;
-      max-width: 420px;
-      height: 100%;
-      background: #c8c3b8;
-      border: 4px solid #8c1c13;
-      border-radius: 12px;
+      max-width: 390px;
+      height: 100vh;
+      max-height: 820px;
+      background: #272730;
+      border-radius: 28px;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.7), inset 0 2px 3px rgba(255,255,255,0.15);
+      display: flex;
+      flex-direction: column;
+      padding: 14px;
+      touch-action: none;
+    }
+
+    /* Рамка дисплея */
+    .screen-bezel {
+      background: #111113;
+      border-radius: 16px;
+      padding: 10px 10px 6px;
+      box-shadow: inset 0 4px 10px rgba(0,0,0,0.9);
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 10px;
-      box-shadow: inset 0 0 10px rgba(0,0,0,0.2);
     }
-    /* Рамка екрана */
-    .screen-bezel {
+
+    .brand {
+      color: #71717a;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      margin-top: 6px;
+    }
+
+    #game-container {
       width: 100%;
-      height: 48%;
-      background: #2b2b2b;
+      aspect-ratio: 4 / 3;
+      background: #000;
       border-radius: 6px;
-      padding: 6px;
-      box-shadow: inset 0 0 8px rgba(0,0,0,0.8);
+      overflow: hidden;
       position: relative;
     }
+
     #game {
-      width: 100%;
-      height: 100%;
-      background: #000;
+      width: 100% !important;
+      height: 100% !important;
     }
-    /* Панель керування */
+
+    /* Секція керування */
     .controls {
-      width: 100%;
-      height: 52%;
+      flex: 1;
       display: flex;
       flex-direction: column;
-      justify-content: space-between;
-      padding-top: 10px;
+      justify-content: space-around;
+      padding: 8px 6px 0;
     }
-    .dpad-action-row {
+
+    .main-pads {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      width: 100%;
-      padding: 0 15px;
+      padding: 0 10px;
     }
-    /* Хрестовина (D-Pad) */
+
+    /* Хрестовина D-Pad */
     .dpad {
       position: relative;
-      width: 120px;
-      height: 120px;
+      width: 130px;
+      height: 130px;
     }
+
     .dpad-btn {
       position: absolute;
-      background: #222;
-      border: 2px solid #111;
-      border-radius: 4px;
-      active { background: #444; }
+      background: #1c1c22;
+      border: 2px solid #0f0f13;
+      box-shadow: 0 4px 0 #09090b;
+      border-radius: 6px;
+      cursor: pointer;
     }
-    .dpad-btn:active { background: #555; }
-    .dpad-up { top: 0; left: 40px; width: 40px; height: 45px; }
-    .dpad-down { bottom: 0; left: 40px; width: 40px; height: 45px; }
-    .dpad-left { top: 40px; left: 0; width: 45px; height: 40px; }
-    .dpad-right { top: 40px; right: 0; width: 45px; height: 40px; }
-    .dpad-center { top: 40px; left: 40px; width: 40px; height: 40px; background: #222; position: absolute; }
 
-    /* Кнопки A та B у фірмовому стилі Dendy */
+    .dpad-btn:active, .dpad-btn.pressed {
+      box-shadow: 0 1px 0 #09090b;
+      transform: translateY(3px);
+      background: #2b2b35;
+    }
+
+    .dpad-up { top: 0; left: 45px; width: 40px; height: 45px; }
+    .dpad-down { bottom: 0; left: 45px; width: 40px; height: 45px; }
+    .dpad-left { top: 45px; left: 0; width: 45px; height: 40px; }
+    .dpad-right { top: 45px; right: 0; width: 45px; height: 40px; }
+    .dpad-center {
+      position: absolute;
+      top: 45px;
+      left: 45px;
+      width: 40px;
+      height: 40px;
+      background: #1c1c22;
+    }
+
+    /* Кнопки дій B / A */
     .action-buttons {
       display: flex;
-      gap: 15px;
-      transform: rotate(-15deg);
-    }
-    .btn-round {
-      width: 50px;
-      height: 50px;
-      background: #8c1c13;
-      border: 2px solid #4a0e0a;
-      border-radius: 50%;
-      color: #fff;
-      font-weight: bold;
-      font-size: 18px;
-      box-shadow: 0 4px #4a0e0a;
-    }
-    .btn-round:active {
-      transform: translateY(3px);
-      box-shadow: 0 1px #4a0e0a;
+      gap: 16px;
+      transform: rotate(-25deg);
     }
 
-    /* Кнопки Select / Start */
-    .system-buttons {
+    .action-btn {
+      width: 54px;
+      height: 54px;
+      border-radius: 50%;
+      background: #dc2626;
+      border: 2px solid #7f1d1d;
+      box-shadow: 0 5px 0 #500724;
+      color: #ffffff;
+      font-size: 19px;
+      font-weight: 800;
       display: flex;
       justify-content: center;
-      gap: 30px;
-      margin-bottom: 15px;
+      align-items: center;
+      cursor: pointer;
     }
-    .btn-pill {
-      width: 60px;
-      height: 18px;
-      background: #555;
-      border: none;
-      border-radius: 10px;
-      transform: rotate(-20deg);
-      box-shadow: 0 2px #222;
+
+    .action-btn:active, .action-btn.pressed {
+      box-shadow: 0 1px 0 #500724;
+      transform: translateY(4px);
+      background: #ef4444;
     }
-    .btn-pill:active {
-      transform: rotate(-20deg) translateY(2px);
+
+    /* Select / Start */
+    .system-pads {
+      display: flex;
+      justify-content: center;
+      gap: 36px;
+      margin-bottom: 6px;
+    }
+
+    .sys-btn-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .sys-btn {
+      width: 48px;
+      height: 13px;
+      background: #52525b;
+      border: 1px solid #27272a;
+      border-radius: 8px;
+      transform: rotate(-25deg);
+      box-shadow: 0 2px 0 #18181b;
+      cursor: pointer;
+    }
+
+    .sys-btn:active, .sys-btn.pressed {
       box-shadow: none;
+      transform: rotate(-25deg) translateY(2px);
     }
-    .btn-label {
-      font-size: 11px;
-      color: #8c1c13;
-      font-weight: bold;
-      text-align: center;
-      margin-top: 4px;
+
+    .sys-label {
+      font-size: 10px;
+      color: #a1a1aa;
+      font-weight: 700;
+      letter-spacing: 1px;
     }
   </style>
 </head>
 <body>
 
-  <div class="console-body">
-    <!-- Екран без тулбарів і стартових заставок -->
+  <div class="console">
     <div class="screen-bezel">
-      <div id="game"></div>
+      <div id="game-container">
+        <div id="game"></div>
+      </div>
+      <div class="brand">DENDYGRAM • PORTABLE</div>
     </div>
 
-    <!-- Органи керування -->
     <div class="controls">
-      <div class="dpad-action-row">
-        <!-- D-Pad -->
+      <div class="main-pads">
+        <!-- D-PAD -->
         <div class="dpad">
           <div class="dpad-center"></div>
-          <button class="dpad-btn dpad-up" data-key="ArrowUp"></button>
-          <button class="dpad-btn dpad-down" data-key="ArrowDown"></button>
-          <button class="dpad-btn dpad-left" data-key="ArrowLeft"></button>
-          <button class="dpad-btn dpad-right" data-key="ArrowRight"></button>
+          <div class="dpad-btn dpad-up" data-key="ArrowUp"></div>
+          <div class="dpad-btn dpad-down" data-key="ArrowDown"></div>
+          <div class="dpad-btn dpad-left" data-key="ArrowLeft"></div>
+          <div class="dpad-btn dpad-right" data-key="ArrowRight"></div>
         </div>
 
-        <!-- Кнопки B / A -->
+        <!-- B / A -->
         <div class="action-buttons">
-          <div>
-            <button class="btn-round" data-key="KeyS">B</button>
-          </div>
-          <div>
-            <button class="btn-round" data-key="KeyA">A</button>
-          </div>
+          <div class="action-btn" data-key="KeyZ">B</div>
+          <div class="action-btn" data-key="KeyX">A</div>
         </div>
       </div>
 
       <!-- Select / Start -->
-      <div class="system-buttons">
-        <div>
-          <button class="btn-pill" data-key="ShiftRight"></button>
-          <div class="btn-label">SELECT</div>
+      <div class="system-pads">
+        <div class="sys-btn-wrap">
+          <div class="sys-btn" data-key="ShiftLeft"></div>
+          <span class="sys-label">SELECT</span>
         </div>
-        <div>
-          <button class="btn-pill" data-key="Enter"></button>
-          <div class="btn-label">START</div>
+        <div class="sys-btn-wrap">
+          <div class="sys-btn" data-key="Enter"></div>
+          <span class="sys-label">START</span>
         </div>
       </div>
     </div>
@@ -190,55 +239,143 @@
     const tg = window.Telegram?.WebApp;
     if (tg) {
       tg.expand();
+      tg.ready();
     }
 
-    const urlParams = new URLSearchParams(window.location.search);
-    const gameFile = urlParams.get('game') || 'super_mario.nes';
+    // Декодування base64url від grammY бота
+    function decodeBase64Url(str) {
+      str = str.replace(/-/g, '+').replace(/_/g, '/');
+      while (str.length % 4) {
+        str += '=';
+      }
+      return decodeURIComponent(escape(atob(str)));
+    }
 
-    // Конфіг EmulatorJS без стартового вікна
+    // Отримання ROM посилання зі start_param або параметрів URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const startAppParam = tg?.initDataUnsafe?.start_param || urlParams.get('tgWebAppStartParam') || urlParams.get('startapp');
+
+    let gameRomUrl = '';
+    if (startAppParam) {
+      try {
+        gameRomUrl = decodeBase64Url(startAppParam);
+      } catch (err) {
+        console.error('Помилка парсингу картриджа:', err);
+      }
+    }
+
+    // Дефолтний бекап, якщо запустили не через бота
+    if (!gameRomUrl) {
+      gameRomUrl = 'roms/game.nes';
+    }
+
+    // Налаштування EmulatorJS
     window.EJS_player = '#game';
     window.EJS_core = 'nes';
-    window.EJS_gameUrl = 'roms/' + gameFile;
+    window.EJS_gameUrl = gameRomUrl;
     window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
     window.EJS_startOnLoaded = true;
     window.EJS_alignStartButton = false;
     window.EJS_disableToolbar = true;
 
-    // Симуляція подій клавіатури для кнопок на екрані
-    function sendKeyEvent(type, code) {
-      const event = new KeyboardEvent(type, {
-        code: code,
-        key: code,
+    // Мапа кнопок для браузерних KeyboardEvent
+    const keyMap = {
+      ArrowUp:    { key: 'ArrowUp',    code: 'ArrowUp',    keyCode: 38 },
+      ArrowDown:  { key: 'ArrowDown',  code: 'ArrowDown',  keyCode: 40 },
+      ArrowLeft:  { key: 'ArrowLeft',  code: 'ArrowLeft',  keyCode: 37 },
+      ArrowRight: { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 },
+      KeyX:       { key: 'x',          code: 'KeyX',       keyCode: 88 },
+      KeyZ:       { key: 'z',          code: 'KeyZ',       keyCode: 90 },
+      Enter:      { key: 'Enter',      code: 'Enter',      keyCode: 13 },
+      ShiftLeft:  { key: 'Shift',      code: 'ShiftLeft',  keyCode: 16 }
+    };
+
+    // Індекси RetroArch: 0: B, 2: SELECT, 3: START, 4: UP, 5: DOWN, 6: LEFT, 7: RIGHT, 8: A
+    const ejsBtnMap = {
+      KeyZ: 0,
+      KeyX: 8,
+      ShiftLeft: 2,
+      Enter: 3,
+      ArrowUp: 4,
+      ArrowDown: 5,
+      ArrowLeft: 6,
+      ArrowRight: 7
+    };
+
+    function triggerKey(code, type) {
+      const isDown = (type === 'keydown');
+
+      // 1. Прямий виклик API ядра RetroArch
+      try {
+        if (window.EJS_emulator && window.EJS_emulator.controls && typeof window.EJS_emulator.controls.simulateButton === 'function') {
+          const btnId = ejsBtnMap[code];
+          if (btnId !== undefined) {
+            window.EJS_emulator.controls.simulateButton(0, btnId, isDown ? 1 : 0);
+            return;
+          }
+        }
+      } catch (err) {}
+
+      // 2. Фолбек-івенти для Canvas
+      const meta = keyMap[code];
+      if (!meta) return;
+
+      const eventInit = {
+        key: meta.key,
+        code: meta.code,
+        keyCode: meta.keyCode,
+        which: meta.keyCode,
         bubbles: true,
-        cancelable: true
-      });
-      window.dispatchEvent(event);
-      document.dispatchEvent(event);
+        cancelable: true,
+        composed: true,
+        view: window
+      };
+
+      const ev = new KeyboardEvent(type, eventInit);
+      Object.defineProperty(ev, 'keyCode', { get: () => meta.keyCode });
+      Object.defineProperty(ev, 'which', { get: () => meta.keyCode });
+
+      const targets = [
+        document.querySelector('#game canvas'),
+        document.querySelector('canvas'),
+        document.getElementById('game'),
+        window,
+        document
+      ];
+
+      for (const target of targets) {
+        if (target) {
+          if (typeof target.focus === 'function') target.focus();
+          target.dispatchEvent(ev);
+        }
+      }
     }
 
-    const buttons = document.querySelectorAll('button[data-key]');
-    buttons.forEach(btn => {
-      const code = btn.getAttribute('data-key');
+    // Підключення Pointer Events з легким вібро-відгуком у стилі Taptic
+    document.querySelectorAll('[data-key]').forEach(elem => {
+      const code = elem.getAttribute('data-key');
 
-      btn.addEventListener('touchstart', (e) => {
+      const handlePress = (e) => {
         e.preventDefault();
-        sendKeyEvent('keydown', code);
-      }, { passive: false });
+        elem.classList.add('pressed');
+        if (tg?.HapticFeedback) {
+          tg.HapticFeedback.impactOccurred('medium');
+        } else if (navigator.vibrate) {
+          navigator.vibrate(12);
+        }
+        triggerKey(code, 'keydown');
+      };
 
-      btn.addEventListener('touchend', (e) => {
+      const handleRelease = (e) => {
         e.preventDefault();
-        sendKeyEvent('keyup', code);
-      }, { passive: false });
+        elem.classList.remove('pressed');
+        triggerKey(code, 'keyup');
+      };
 
-      btn.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-        sendKeyEvent('keydown', code);
-      });
-
-      btn.addEventListener('mouseup', (e) => {
-        e.preventDefault();
-        sendKeyEvent('keyup', code);
-      });
+      elem.addEventListener('pointerdown', handlePress);
+      elem.addEventListener('pointerup', handleRelease);
+      elem.addEventListener('pointercancel', handleRelease);
+      elem.addEventListener('pointerleave', handleRelease);
     });
   </script>
   <script src="https://cdn.emulatorjs.org/stable/data/loader.js"></script>
