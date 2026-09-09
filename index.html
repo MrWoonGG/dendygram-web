@@ -34,7 +34,7 @@
       box-shadow: 0 20px 50px rgba(0,0,0,0.7), inset 0 2px 3px rgba(255,255,255,0.15);
       display: flex;
       flex-direction: column;
-      padding: 12px 8px; /* Зменшили бічні відступи корпусу */
+      padding: 12px 8px;
       touch-action: none;
     }
 
@@ -55,6 +55,7 @@
       font-weight: 700;
       letter-spacing: 2px;
       margin-top: 6px;
+      transition: color 0.3s ease;
     }
 
     #game-container {
@@ -71,6 +72,18 @@
       height: 100% !important;
     }
 
+    /* Ховаємо вбудовані елементи EmulatorJS: налаштування, тулбари, віртуальні тач-кнопки */
+    #game * [class*="ejs_"],
+    #game * [id*="controls"],
+    #game * [id*="gamepad"],
+    #game .ejs_menu,
+    #game .ejs_virtual_gamepad,
+    #game .ejs_start_screen {
+      display: none !important;
+      opacity: 0 !important;
+      pointer-events: none !important;
+    }
+
     .controls {
       flex: 1;
       display: flex;
@@ -79,7 +92,6 @@
       padding: 16px 4px 10px;
     }
 
-    /* Рядок кнопок керування розтягнутий впритул до боків */
     .main-pads {
       display: flex;
       justify-content: space-between;
@@ -88,7 +100,6 @@
       padding: 0 2px;
     }
 
-    /* Хрестовина D-Pad впритул до лівого краю */
     .dpad {
       position: relative;
       width: 130px;
@@ -123,7 +134,6 @@
       background: #1c1c22;
     }
 
-    /* Кнопки B / A впритул до правого краю */
     .action-buttons {
       display: flex;
       gap: 14px;
@@ -153,7 +163,6 @@
       background: #ef4444;
     }
 
-    /* Системні кнопки опущені нижче і підписи відсунуті */
     .system-pads {
       display: flex;
       justify-content: center;
@@ -165,7 +174,7 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 8px; /* Збільшили відступ між кнопкою і текстом */
+      gap: 8px;
     }
 
     .sys-btn {
@@ -246,7 +255,16 @@
 
     const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
     const urlParams = new URLSearchParams(window.location.search);
+
     let targetRom = hashParams.get('rom') || urlParams.get('rom') || urlParams.get('startapp') || tg?.initDataUnsafe?.start_param;
+    const roomId = hashParams.get('room') || urlParams.get('room');
+    const playerNum = parseInt(hashParams.get('player') || urlParams.get('player') || '1', 10);
+
+    const brandElem = document.querySelector('.brand');
+    if (roomId && brandElem) {
+      brandElem.textContent = `DENDYGRAM • DUO (P${playerNum})`;
+      brandElem.style.color = playerNum === 1 ? '#38bdf8' : '#34d399';
+    }
 
     if (targetRom) {
       try {
@@ -267,12 +285,20 @@
       window.EJS_alignStartButton = false;
       window.EJS_disableToolbar = true;
 
+      // Вимикаємо екранний віртуальний геймпад емулятора для мобілок
+      window.EJS_VirtualGamepadSettings = [0, 0];
+      window.EJS_mouse = false;
+
+      if (roomId) {
+        window.EJS_netplayUrl = 'wss://netplay.emulatorjs.org';
+        window.EJS_gameId = roomId;
+      }
+
       const loader = document.createElement('script');
       loader.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
       document.body.appendChild(loader);
     }
 
-    // Блок емуляції кнопок
     const keyMap = {
       ArrowUp:    { key: 'ArrowUp',    code: 'ArrowUp',    keyCode: 38 },
       ArrowDown:  { key: 'ArrowDown',  code: 'ArrowDown',  keyCode: 40 },
@@ -297,12 +323,13 @@
 
     function triggerKey(code, type) {
       const isDown = (type === 'keydown');
+      const portIndex = playerNum === 2 ? 1 : 0;
 
       try {
         if (window.EJS_emulator?.controls?.simulateButton) {
           const btnId = ejsBtnMap[code];
           if (btnId !== undefined) {
-            window.EJS_emulator.controls.simulateButton(0, btnId, isDown ? 1 : 0);
+            window.EJS_emulator.controls.simulateButton(portIndex, btnId, isDown ? 1 : 0);
             return;
           }
         }
