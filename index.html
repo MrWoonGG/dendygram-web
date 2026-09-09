@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>DendyGram</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <style>
     * {
       box-sizing: border-box;
@@ -34,7 +35,7 @@
       box-shadow: 0 20px 50px rgba(0,0,0,0.7), inset 0 2px 3px rgba(255,255,255,0.15);
       display: flex;
       flex-direction: column;
-      padding: 12px 8px;
+      padding: 10px 8px;
       touch-action: none;
     }
 
@@ -72,16 +73,12 @@
       height: 100% !important;
     }
 
-    /* Ховаємо зайві елементи EmulatorJS */
-    #game * [class*="ejs_"],
-    #game * [id*="controls"],
-    #game * [id*="gamepad"],
-    #game .ejs_menu,
-    #game .ejs_virtual_gamepad,
-    #game .ejs_start_screen {
+    /* Ховаємо виключно меню налаштувань і тач-оверлей, канвас НЕ чіпаємо! */
+    .ejs_menu,
+    .ejs_menu_button,
+    .ejs_touch_dpad,
+    .ejs_touch_buttons {
       display: none !important;
-      opacity: 0 !important;
-      pointer-events: none !important;
     }
 
     .controls {
@@ -89,7 +86,7 @@
       display: flex;
       flex-direction: column;
       justify-content: space-between;
-      padding: 16px 4px 10px;
+      padding: 8px 4px 6px;
     }
 
     .main-pads {
@@ -163,18 +160,38 @@
       background: #ef4444;
     }
 
+    /* Вікно логів над SELECT / START */
+    #debug-box {
+      background: #111113;
+      border: 1px solid #27272a;
+      border-radius: 8px;
+      padding: 6px 8px;
+      height: 52px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 10px;
+      line-height: 1.3;
+      margin: 4px 6px;
+      box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
+    }
+
+    .log-line {
+      word-break: break-all;
+      margin-bottom: 2px;
+    }
+
     .system-pads {
       display: flex;
       justify-content: center;
       gap: 40px;
-      margin-bottom: 8px;
+      margin-bottom: 4px;
     }
 
     .sys-btn-wrap {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
     }
 
     .sys-btn {
@@ -227,6 +244,9 @@
         </div>
       </div>
 
+      <!-- ЛОГИ ПРЯМО НАД SELECT / START -->
+      <div id="debug-box"></div>
+
       <div class="system-pads">
         <div class="sys-btn-wrap">
           <div class="sys-btn" data-key="ShiftLeft"></div>
@@ -247,6 +267,18 @@
       tg.ready();
     }
 
+    const logBox = document.getElementById('debug-box');
+    function log(msg, color = '#38bdf8') {
+      const line = document.createElement('div');
+      line.className = 'log-line';
+      line.style.color = color;
+      line.textContent = `> ${msg}`;
+      logBox.appendChild(line);
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    log("Система ініціалізована", "#a1a1aa");
+
     function decodeBase64Url(str) {
       str = str.replace(/-/g, '+').replace(/_/g, '/');
       while (str.length % 4) str += '=';
@@ -261,13 +293,14 @@
     const playerNum = parseInt(hashParams.get('player') || urlParams.get('player') || '1', 10);
 
     const brandElem = document.querySelector('.brand');
-
     if (roomId && brandElem) {
-      brandElem.textContent = `DENDYGRAM • DUO P${playerNum} (CONNECTING...)`;
-      brandElem.style.color = '#f59e0b';
+      brandElem.textContent = `DENDYGRAM • DUO (P${playerNum})`;
+      brandElem.style.color = playerNum === 1 ? '#38bdf8' : '#34d399';
     }
 
-    // 1. ЗАПУСКАЄМО ГРУ ГАРАНТОВАНО І ОДРАЗУ
+    log(`Режим: ${roomId ? 'DUO (P' + playerNum + ')' : 'SOLO'}`);
+    if (roomId) log(`Room ID: ${roomId}`);
+
     if (targetRom) {
       try {
         if (!targetRom.startsWith('http')) {
@@ -276,8 +309,10 @@
           targetRom = decodeURIComponent(targetRom);
         }
       } catch (e) {
-        console.error("Помилка декодування:", e);
+        log("Помилка декоду РОМу: " + e.message, "#ef4444");
       }
+
+      log("Запуск ядра EmulatorJS...", "#fbbf24");
 
       window.EJS_player = '#game';
       window.EJS_core = 'nes';
@@ -287,83 +322,80 @@
       window.EJS_alignStartButton = false;
       window.EJS_disableToolbar = true;
       window.EJS_VirtualGamepadSettings = [0, 0];
-      window.EJS_mouse = false;
+
+      window.EJS_onGameStart = () => {
+        log("✅ Гра запущена на емуляторі!", "#22c55e");
+      };
 
       const loader = document.createElement('script');
       loader.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
+      loader.onerror = () => log("❌ Не вдалося завантажити loader.js!", "#ef4444");
       document.body.appendChild(loader);
+    } else {
+      log("❌ РОМ не знайдено в URL!", "#ef4444");
     }
 
-    // 2. ФОНОВИЙ ДУО-КОННЕКТ (не крашить гру якщо сервер не відповідає)
+    // P2P PeerJS з детальним логуванням
     let dataConn = null;
 
     if (roomId) {
-      // Підвантажуємо PeerJS асинхронно
-      const peerScript = document.createElement('script');
-      peerScript.src = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';
-      peerScript.onload = () => {
-        try {
-          const roomTag = 'dendygram_net_' + roomId;
+      const roomTag = 'dendygram_' + roomId;
 
-          if (playerNum === 1) {
-            const peer = new Peer(roomTag);
+      if (playerNum === 1) {
+        log("P1: Реєстрація кімнати в P2P...", "#a1a1aa");
+        const peer = new Peer(roomTag);
 
-            peer.on('open', () => {
-              if (brandElem) {
-                brandElem.textContent = "DENDYGRAM • P1 (WAITING P2)";
-                brandElem.style.color = "#38bdf8";
-              }
-            });
+        peer.on('open', (id) => {
+          log(`P1 готовий! ID: ${id}`, "#38bdf8");
+        });
 
-            peer.on('connection', (conn) => {
-              dataConn = conn;
-              if (brandElem) {
-                brandElem.textContent = "DENDYGRAM • DUO CONNECTED!";
-                brandElem.style.color = "#22c55e";
-              }
+        peer.on('connection', (conn) => {
+          dataConn = conn;
+          log("🤝 P2 підключився до гри!", "#22c55e");
+          if (brandElem) brandElem.textContent = "DENDYGRAM • DUO CONNECTED!";
 
-              conn.on('data', (data) => {
-                if (data && data.btnId !== undefined) {
-                  try {
-                    window.EJS_emulator?.controls?.simulateButton(1, data.btnId, data.val);
-                  } catch (err) {}
-                }
-              });
-            });
+          conn.on('data', (data) => {
+            if (data && data.btnId !== undefined) {
+              try {
+                window.EJS_emulator?.controls?.simulateButton(1, data.btnId, data.val);
+              } catch (err) {}
+            }
+          });
 
-            peer.on('error', (e) => console.log("Peer P1 status:", e));
-          } else {
-            const peer = new Peer();
+          conn.on('close', () => {
+            log("⚠️ P2 відключився", "#f59e0b");
+          });
+        });
 
-            peer.on('open', () => {
-              const conn = peer.connect(roomTag, { reliable: true });
-              dataConn = conn;
+        peer.on('error', (err) => {
+          log(`P1 помилка Peer: ${err.type}`, "#f59e0b");
+        });
+      } else {
+        log("P2: Підключення до хоста...", "#a1a1aa");
+        const peer = new Peer();
 
-              conn.on('open', () => {
-                if (brandElem) {
-                  brandElem.textContent = "DENDYGRAM • P2 CONNECTED!";
-                  brandElem.style.color = "#34d399";
-                }
-              });
+        peer.on('open', () => {
+          log("P2: Peer готовий, шукаю хоста...", "#a1a1aa");
+          const conn = peer.connect(roomTag, { reliable: true });
+          dataConn = conn;
 
-              conn.on('close', () => {
-                if (brandElem) {
-                  brandElem.textContent = "DENDYGRAM • P2 (DISCONNECTED)";
-                  brandElem.style.color = "#ef4444";
-                }
-              });
-            });
+          conn.on('open', () => {
+            log("✅ Підключено до P1 (Хоста)!", "#22c55e");
+            if (brandElem) brandElem.textContent = "DENDYGRAM • CONNECTED TO P1";
+          });
 
-            peer.on('error', (e) => console.log("Peer P2 status:", e));
-          }
-        } catch (err) {
-          console.warn("PeerJS init error:", err);
-        }
-      };
-      document.body.appendChild(peerScript);
+          conn.on('close', () => {
+            log("⚠️ Зв'язок із хостом втрачено", "#ef4444");
+          });
+        });
+
+        peer.on('error', (err) => {
+          log(`P2 помилка Peer: ${err.type}`, "#f59e0b");
+        });
+      }
     }
 
-    // 3. ОБРОБКА КНОПОК
+    // Керування
     const ejsBtnMap = {
       KeyZ: 0,
       KeyX: 8,
@@ -382,18 +414,15 @@
       if (btnId === undefined) return;
 
       if (roomId && playerNum === 2) {
-        // Player 2 передає свій інпут через P2P хосту
         if (dataConn && dataConn.open) {
           dataConn.send({ btnId, val });
         }
-        // І паралельно тисне в себе в другий порт
         try {
           window.EJS_emulator?.controls?.simulateButton(1, btnId, val);
         } catch (e) {}
         return;
       }
 
-      // Player 1 (або соло) керує першим гравцем
       try {
         window.EJS_emulator?.controls?.simulateButton(0, btnId, val);
       } catch (err) {}
