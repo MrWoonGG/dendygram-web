@@ -3,40 +3,243 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>DendyGram Emulator</title>
-  <!-- Telegram WebApp SDK -->
+  <title>DendyGram Retro Console</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+    }
     body, html {
       margin: 0;
       padding: 0;
       width: 100%;
       height: 100%;
-      background-color: #000;
+      background-color: #1a1a1a;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-family: sans-serif;
       overflow: hidden;
+    }
+    /* Корпус консолі під колір Dendy Classic */
+    .console-body {
+      width: 100%;
+      max-width: 420px;
+      height: 100%;
+      background: #c8c3b8;
+      border: 4px solid #8c1c13;
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 10px;
+      box-shadow: inset 0 0 10px rgba(0,0,0,0.2);
+    }
+    /* Рамка екрана */
+    .screen-bezel {
+      width: 100%;
+      height: 48%;
+      background: #2b2b2b;
+      border-radius: 6px;
+      padding: 6px;
+      box-shadow: inset 0 0 8px rgba(0,0,0,0.8);
+      position: relative;
     }
     #game {
       width: 100%;
       height: 100%;
+      background: #000;
+    }
+    /* Панель керування */
+    .controls {
+      width: 100%;
+      height: 52%;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding-top: 10px;
+    }
+    .dpad-action-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+      padding: 0 15px;
+    }
+    /* Хрестовина (D-Pad) */
+    .dpad {
+      position: relative;
+      width: 120px;
+      height: 120px;
+    }
+    .dpad-btn {
+      position: absolute;
+      background: #222;
+      border: 2px solid #111;
+      border-radius: 4px;
+      active { background: #444; }
+    }
+    .dpad-btn:active { background: #555; }
+    .dpad-up { top: 0; left: 40px; width: 40px; height: 45px; }
+    .dpad-down { bottom: 0; left: 40px; width: 40px; height: 45px; }
+    .dpad-left { top: 40px; left: 0; width: 45px; height: 40px; }
+    .dpad-right { top: 40px; right: 0; width: 45px; height: 40px; }
+    .dpad-center { top: 40px; left: 40px; width: 40px; height: 40px; background: #222; position: absolute; }
+
+    /* Кнопки A та B у фірмовому стилі Dendy */
+    .action-buttons {
+      display: flex;
+      gap: 15px;
+      transform: rotate(-15deg);
+    }
+    .btn-round {
+      width: 50px;
+      height: 50px;
+      background: #8c1c13;
+      border: 2px solid #4a0e0a;
+      border-radius: 50%;
+      color: #fff;
+      font-weight: bold;
+      font-size: 18px;
+      box-shadow: 0 4px #4a0e0a;
+    }
+    .btn-round:active {
+      transform: translateY(3px);
+      box-shadow: 0 1px #4a0e0a;
+    }
+
+    /* Кнопки Select / Start */
+    .system-buttons {
+      display: flex;
+      justify-content: center;
+      gap: 30px;
+      margin-bottom: 15px;
+    }
+    .btn-pill {
+      width: 60px;
+      height: 18px;
+      background: #555;
+      border: none;
+      border-radius: 10px;
+      transform: rotate(-20deg);
+      box-shadow: 0 2px #222;
+    }
+    .btn-pill:active {
+      transform: rotate(-20deg) translateY(2px);
+      box-shadow: none;
+    }
+    .btn-label {
+      font-size: 11px;
+      color: #8c1c13;
+      font-weight: bold;
+      text-align: center;
+      margin-top: 4px;
     }
   </style>
 </head>
 <body>
-  <div id="game"></div>
+
+  <div class="console-body">
+    <!-- Екран без тулбарів і стартових заставок -->
+    <div class="screen-bezel">
+      <div id="game"></div>
+    </div>
+
+    <!-- Органи керування -->
+    <div class="controls">
+      <div class="dpad-action-row">
+        <!-- D-Pad -->
+        <div class="dpad">
+          <div class="dpad-center"></div>
+          <button class="dpad-btn dpad-up" data-key="ArrowUp"></button>
+          <button class="dpad-btn dpad-down" data-key="ArrowDown"></button>
+          <button class="dpad-btn dpad-left" data-key="ArrowLeft"></button>
+          <button class="dpad-btn dpad-right" data-key="ArrowRight"></button>
+        </div>
+
+        <!-- Кнопки B / A -->
+        <div class="action-buttons">
+          <div>
+            <button class="btn-round" data-key="KeyS">B</button>
+          </div>
+          <div>
+            <button class="btn-round" data-key="KeyA">A</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Select / Start -->
+      <div class="system-buttons">
+        <div>
+          <button class="btn-pill" data-key="ShiftRight"></button>
+          <div class="btn-label">SELECT</div>
+        </div>
+        <div>
+          <button class="btn-pill" data-key="Enter"></button>
+          <div class="btn-label">START</div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script>
-    const tg = window.Telegram.WebApp;
-    tg.expand();
+    // Ініціалізація Telegram WebApp
+    const tg = window.Telegram?.WebApp;
+    if (tg) {
+      tg.expand();
+    }
 
-    // Дістаємо назву гри або netplay-кімнати з параметрів запуску
     const urlParams = new URLSearchParams(window.location.search);
     const gameFile = urlParams.get('game') || 'super_mario.nes';
 
+    // Конфіг EmulatorJS без стартового вікна
     window.EJS_player = '#game';
     window.EJS_core = 'nes';
     window.EJS_gameUrl = 'roms/' + gameFile;
     window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
     window.EJS_startOnLoaded = true;
+    window.EJS_alignStartButton = false;
+    window.EJS_disableToolbar = true;
+
+    // Симуляція подій клавіатури для кнопок на екрані
+    function sendKeyEvent(type, code) {
+      const event = new KeyboardEvent(type, {
+        code: code,
+        key: code,
+        bubbles: true,
+        cancelable: true
+      });
+      window.dispatchEvent(event);
+      document.dispatchEvent(event);
+    }
+
+    const buttons = document.querySelectorAll('button[data-key]');
+    buttons.forEach(btn => {
+      const code = btn.getAttribute('data-key');
+
+      btn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        sendKeyEvent('keydown', code);
+      }, { passive: false });
+
+      btn.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        sendKeyEvent('keyup', code);
+      }, { passive: false });
+
+      btn.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        sendKeyEvent('keydown', code);
+      });
+
+      btn.addEventListener('mouseup', (e) => {
+        e.preventDefault();
+        sendKeyEvent('keyup', code);
+      });
+    });
   </script>
   <script src="https://cdn.emulatorjs.org/stable/data/loader.js"></script>
 </body>
