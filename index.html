@@ -230,27 +230,105 @@
     </div>
   </div>
 
-  <script>
+<script>
     const tg = window.Telegram?.WebApp;
     if (tg) {
       tg.expand();
       tg.ready();
     }
 
-    // Парсинг лінка з хешу #rom= або query-параметра ?rom=
+    const gameScreen = document.getElementById('game');
+
+    // Логер прямо на екран консолі
+    function printLog(msg, color = '#38bdf8') {
+      const p = document.createElement('div');
+      p.style.color = color;
+      p.style.fontSize = '11px';
+      p.style.fontFamily = 'monospace';
+      p.style.wordBreak = 'break-all';
+      p.style.marginBottom = '4px';
+      p.textContent = msg;
+      gameScreen.appendChild(p);
+    }
+
+    gameScreen.innerHTML = '';
+    gameScreen.style.padding = '8px';
+    gameScreen.style.overflowY = 'auto';
+
+    printLog("=== DENDYGRAM DEBUG ===");
+
+    // Парсимо параметри
     const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
     const urlParams = new URLSearchParams(window.location.search);
+    const startAppParam = tg?.initDataUnsafe?.start_param;
 
-    const targetRomUrl = hashParams.get('rom') || urlParams.get('rom') || urlParams.get('game');
+    printLog("URL Hash: " + (window.location.hash || "empty"));
+    printLog("URL Search: " + (window.location.search || "empty"));
+    printLog("tg.start_param: " + (startAppParam || "none"));
 
-    // Налаштування емулятора
-    window.EJS_player = '#game';
-    window.EJS_core = 'nes';
-    window.EJS_gameUrl = targetRomUrl ? decodeURIComponent(targetRomUrl) : 'roms/game.nes';
-    window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
-    window.EJS_startOnLoaded = true;
-    window.EJS_alignStartButton = false;
-    window.EJS_disableToolbar = true;
+    let targetRomUrl = hashParams.get('rom') || urlParams.get('rom') || urlParams.get('startapp') || startAppParam;
+
+    if (!targetRomUrl) {
+      printLog("❌ РОМ НЕ ПЕРЕДАНО! Перевір URL кнопки в боті.", "#ef4444");
+    } else {
+      // Якщо рядок закодований, розкодовуємо
+      try {
+        if (targetRomUrl.startsWith('http') === false) {
+          // Якщо це base64url
+          let b64 = targetRomUrl.replace(/-/g, '+').replace(/_/g, '/');
+          while (b64.length % 4) b64 += '=';
+          targetRomUrl = decodeURIComponent(escape(atob(b64)));
+        } else {
+          targetRomUrl = decodeURIComponent(targetRomUrl);
+        }
+      } catch (e) {
+        printLog("Помилка декоду: " + e.message, "#f59e0b");
+      }
+
+      printLog("🔗 Target ROM URL:", "#a1a1aa");
+      printLog(targetRomUrl, "#e4e4e7");
+
+      // Тестовий fetch до Cloudflare Worker перед стартом емулятора
+      printLog("📡 Тестуємо запит до воркера...", "#fbbf24");
+
+      fetch(targetRomUrl)
+        .then(async (res) => {
+          printLog(`Статус відповіді: ${res.status} ${res.statusText}`, res.ok ? "#22c55e" : "#ef4444");
+          printLog("CORS Allow-Origin: " + (res.headers.get("access-control-allow-origin") || "ВІДСУТНІЙ!"), "#a1a1aa");
+
+          if (!res.ok) {
+            const errText = await res.text();
+            printLog("Тіло помилки: " + errText.slice(0, 150), "#ef4444");
+            return;
+          }
+
+          const blob = await res.blob();
+          printLog(`✅ Файл отримано успішно! Розмір: ${blob.size} байт`, "#22c55e");
+          printLog("🚀 Запускаємо EmulatorJS...", "#38bdf8");
+
+          // Якщо fetch пройшов на ура — запускаємо ядро
+          setTimeout(() => {
+            gameScreen.innerHTML = '';
+            gameScreen.style.padding = '0';
+
+            window.EJS_player = '#game';
+            window.EJS_core = 'nes';
+            window.EJS_gameUrl = targetRomUrl;
+            window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
+            window.EJS_startOnLoaded = true;
+            window.EJS_alignStartButton = false;
+            window.EJS_disableToolbar = true;
+
+            const loader = document.createElement('script');
+            loader.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
+            document.body.appendChild(loader);
+          }, 1500);
+        })
+        .catch(err => {
+          printLog("❌ МЕРЕЖЕВИЙ ЗБІЙ (CORS або DNS):", "#ef4444");
+          printLog(err.message, "#ef4444");
+        });
+    }
 
     // Мапа кнопок для емулятора
     const keyMap = {
