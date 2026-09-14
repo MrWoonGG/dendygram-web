@@ -5,8 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>DendyGram</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <!-- PeerJS для P2P WebRTC зв'язку між гравцями -->
-  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <style>
     * {
       box-sizing: border-box;
@@ -68,11 +66,6 @@
       border-radius: 6px;
       overflow: hidden;
       position: relative;
-      /* Піксельна чіткість без розмиття */
-      image-rendering: -moz-crisp-edges;
-      image-rendering: -webkit-crisp-edges;
-      image-rendering: pixelated;
-      image-rendering: crisp-edges;
     }
 
     #game {
@@ -80,60 +73,22 @@
       height: 100% !important;
     }
 
-    #remote-stream-video,
     #game canvas {
       display: block !important;
-      opacity: 1 !important;
-      visibility: visible !important;
       width: 100% !important;
       height: 100% !important;
       object-fit: contain;
-      image-rendering: -moz-crisp-edges;
-      image-rendering: -webkit-crisp-edges;
       image-rendering: pixelated;
-      image-rendering: crisp-edges;
     }
 
-    /* Приховуємо системний сенсорний геймпад і меню EmulatorJS */
+    /* Приховуємо виключно вбудований сенсорний шар та оверлей меню */
     #game .ejs_virtual_gamepad,
     #game .ejs_menu,
     #game .ejs_start_screen,
-    #game [id*="controls_menu"],
-    #game [id*="gamepad_menu"] {
+    #game [id*="controls_menu"] {
       display: none !important;
       opacity: 0 !important;
       pointer-events: none !important;
-    }
-
-    #waiting-overlay {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: #09090b;
-      display: none;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      z-index: 100;
-      color: #fafafa;
-      text-align: center;
-      padding: 20px;
-    }
-
-    .spinner {
-      width: 38px;
-      height: 38px;
-      border: 3px solid rgba(255,255,255,0.1);
-      border-top-color: #38bdf8;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      margin-bottom: 14px;
-    }
-
-    @keyframes spin {
-      to { transform: rotate(360deg); }
     }
 
     .controls {
@@ -259,11 +214,6 @@
     <div class="screen-bezel">
       <div id="game-container">
         <div id="game"></div>
-        <div id="waiting-overlay">
-          <div class="spinner"></div>
-          <div id="overlay-msg" style="font-weight: 700; font-size: 14px; margin-bottom: 6px;">ОЧІКУЄМО ХОСТА...</div>
-          <div id="overlay-sub" style="color: #71717a; font-size: 11px;">Player 1 запускає картридж. Зачекай хвилинку!</div>
-        </div>
       </div>
       <div class="brand">DENDYGRAM • PORTABLE</div>
     </div>
@@ -272,25 +222,25 @@
       <div class="main-pads">
         <div class="dpad">
           <div class="dpad-center"></div>
-          <div class="dpad-btn dpad-up" data-key="ArrowUp"></div>
-          <div class="dpad-btn dpad-down" data-key="ArrowDown"></div>
-          <div class="dpad-btn dpad-left" data-key="ArrowLeft"></div>
-          <div class="dpad-btn dpad-right" data-key="ArrowRight"></div>
+          <div class="dpad-btn dpad-up" data-btn="4"></div>
+          <div class="dpad-btn dpad-down" data-btn="5"></div>
+          <div class="dpad-btn dpad-left" data-btn="6"></div>
+          <div class="dpad-btn dpad-right" data-btn="7"></div>
         </div>
 
         <div class="action-buttons">
-          <div class="action-btn" data-key="KeyZ">B</div>
-          <div class="action-btn" data-key="KeyX">A</div>
+          <div class="action-btn" data-btn="0">B</div>
+          <div class="action-btn" data-btn="1">A</div>
         </div>
       </div>
 
       <div class="system-pads">
         <div class="sys-btn-wrap">
-          <div class="sys-btn" data-key="ShiftLeft"></div>
+          <div class="sys-btn" data-btn="2"></div>
           <span class="sys-label">SELECT</span>
         </div>
         <div class="sys-btn-wrap">
-          <div class="sys-btn" data-key="Enter"></div>
+          <div class="sys-btn" data-btn="3"></div>
           <span class="sys-label">START</span>
         </div>
       </div>
@@ -328,43 +278,12 @@
     const playerNum = parseInt(appData.p || hashParams.get('player') || urlParams.get('player') || '1', 10);
 
     const brandElem = document.querySelector('.brand');
-    const waitingOverlay = document.getElementById('waiting-overlay');
-    const overlayMsg = document.getElementById('overlay-msg');
-    const overlaySub = document.getElementById('overlay-sub');
-    const gameContainer = document.getElementById('game-container');
-
-    const peerConfig = {
-      config: {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' }
-        ]
-      }
-    };
-
-    let isEmulatorStarted = false;
-    let peer = null;
-    let dataConnection = null;
-    let reconnectTimer = null;
-    const hostPeerId = `dendygram_v1_room_${roomId}`;
-
-    function setBrandStatus(text, color) {
-      if (!brandElem) return;
-      brandElem.textContent = text;
-      if (color) brandElem.style.color = color;
+    if (roomId && brandElem) {
+      brandElem.textContent = `DENDYGRAM • DUO (PLAYER ${playerNum})`;
+      brandElem.style.color = playerNum === 1 ? '#38bdf8' : '#34d399';
     }
 
-    function setOverlay(msg, sub, show = true) {
-      if (overlayMsg) overlayMsg.textContent = msg;
-      if (overlaySub) overlaySub.textContent = sub;
-      waitingOverlay.style.display = show ? 'flex' : 'none';
-    }
-
-    function startEmulator() {
-      if (isEmulatorStarted || !targetRom) return;
-      isEmulatorStarted = true;
-      waitingOverlay.style.display = 'none';
-
+    if (targetRom) {
       try {
         if (!targetRom.startsWith('http')) {
           targetRom = decodeBase64Url(targetRom);
@@ -375,6 +294,7 @@
         console.error("Помилка декодування:", e);
       }
 
+      // 1. Конфігурація нативного емулятора
       window.EJS_player = '#game';
       window.EJS_core = 'nes';
       window.EJS_gameUrl = targetRom;
@@ -385,217 +305,39 @@
       window.EJS_VirtualGamepadSettings = [0, 0];
       window.EJS_mouse = false;
 
+      // 2. Нативний Netplay через публічний ретро-сервер
+      if (roomId) {
+        window.EJS_netplayUrl = 'wss://netplay.emulatorjs.org';
+        window.EJS_gameId = `dendy_${roomId}`;
+        window.EJS_netplayServer = true;
+      }
+
       const loader = document.createElement('script');
       loader.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
       document.body.appendChild(loader);
     }
 
-    // P2P WebRTC
-    if (roomId) {
-      setBrandStatus(`DENDYGRAM • DUO (P${playerNum})`, playerNum === 1 ? '#38bdf8' : '#34d399');
-
-      if (playerNum === 1) {
-        startEmulator();
-        peer = new Peer(hostPeerId, peerConfig);
-
-        peer.on('connection', (conn) => {
-          dataConnection = conn;
-          setBrandStatus("DENDYGRAM • ДРУГИЙ ГРАВЕЦЬ У ГРІ!", "#22c55e");
-
-          conn.on('data', (data) => {
-            if (!data) return;
-            let simulated = false;
-            try {
-              if (window.EJS_emulator?.controls?.simulateButton && data.btnId !== undefined) {
-                window.EJS_emulator.controls.simulateButton(1, data.btnId, data.val);
-                simulated = true;
-              }
-            } catch (e) {}
-
-            if (!simulated && data.code && data.type) {
-              dispatchRawKey(data.code, data.type);
-            }
-          });
-
-          conn.on('close', () => {
-            setBrandStatus("DENDYGRAM • P2 ВІДПАВ :(", "#eab308");
-          });
-
-          waitForCanvasAndStream(conn.peer);
-        });
-
-        peer.on('error', (err) => {
-          console.error("Host error:", err);
-          if (err.type === 'unavailable-id') {
-            setBrandStatus("DENDYGRAM • КІМНАТА ВЖЕ ІСНУЄ", "#ef4444");
-          }
-        });
-
-      } else {
-        setOverlay("ОЧІКУЄМО ХОСТА...", "Player 1 запускає гру. Зачекай хвилинку!");
-        document.getElementById('game').style.display = 'none';
-
-        let remoteVideo = document.getElementById('remote-stream-video');
-        if (!remoteVideo) {
-          remoteVideo = document.createElement('video');
-          remoteVideo.id = 'remote-stream-video';
-          remoteVideo.autoplay = true;
-          remoteVideo.playsInline = true;
-          remoteVideo.muted = true;
-          remoteVideo.style.cssText = 'width: 100%; height: 100%; object-fit: contain; background: #000;';
-          gameContainer.appendChild(remoteVideo);
-
-          remoteVideo.addEventListener('playing', () => {
-            waitingOverlay.style.display = 'none';
-            setBrandStatus("DENDYGRAM • НА СТРІМІ ХОСТА!", "#22c55e");
-          });
-        }
-
-        peer = new Peer(peerConfig);
-
-        function connectToHost() {
-          if (!peer || peer.destroyed) return;
-          dataConnection = peer.connect(hostPeerId, { reliable: true });
-
-          dataConnection.on('open', () => {
-            clearTimeout(reconnectTimer);
-          });
-
-          dataConnection.on('close', () => {
-            handleHostDisconnect();
-          });
-        }
-
-        function handleHostDisconnect() {
-          if (remoteVideo) {
-            remoteVideo.pause();
-            remoteVideo.srcObject = null;
-          }
-          setOverlay("ХОСТ ВІДКЛЮЧИВСЯ", "Очікуємо відновлення зв'язку з хостом...");
-          setBrandStatus("DENDYGRAM • ДИСКОНЕКТ", "#ef4444");
-          clearTimeout(reconnectTimer);
-          reconnectTimer = setTimeout(connectToHost, 2500);
-        }
-
-        peer.on('open', () => {
-          connectToHost();
-        });
-
-        peer.on('call', (call) => {
-          call.answer();
-          call.on('stream', (remoteStream) => {
-            remoteVideo.srcObject = remoteStream;
-            remoteVideo.play().catch(e => console.warn("Video play error:", e));
-          });
-
-          call.on('close', () => {
-            handleHostDisconnect();
-          });
-        });
-
-        peer.on('error', (err) => {
-          console.warn("Client peer error:", err);
-          handleHostDisconnect();
-        });
-      }
-    } else {
-      startEmulator();
-    }
-
-    function waitForCanvasAndStream(guestPeerId) {
-      let attempts = 0;
-      const checkInterval = setInterval(() => {
-        attempts++;
-        const canvas = document.querySelector('#game canvas');
-
-        if (canvas && canvas.width > 0 && window.EJS_emulator) {
-          clearInterval(checkInterval);
-          try {
-            const stream = canvas.captureStream(30);
-            peer.call(guestPeerId, stream);
-          } catch (err) {
-            console.error("captureStream error:", err);
-          }
-        }
-
-        if (attempts > 50) {
-          clearInterval(checkInterval);
-        }
-      }, 400);
-    }
-
-    // Мапінг кнопок та клавіатури
-    const keyMap = {
-      KeyZ:       { key: 'z',          code: 'KeyZ',       keyCode: 90 },
-      KeyX:       { key: 'x',          code: 'KeyX',       keyCode: 88 },
-      ShiftLeft:  { key: 'Shift',      code: 'ShiftRight', keyCode: 16 },
-      Enter:      { key: 'Enter',      code: 'Enter',      keyCode: 13 },
-      ArrowUp:    { key: 'ArrowUp',    code: 'ArrowUp',    keyCode: 38 },
-      ArrowDown:  { key: 'ArrowDown',  code: 'ArrowDown',  keyCode: 40 },
-      ArrowLeft:  { key: 'ArrowLeft',  code: 'ArrowLeft',  keyCode: 37 },
-      ArrowRight: { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 }
-    };
-
-    const ejsBtnMap = {
-      KeyZ: 0,
-      KeyX: 8,
-      ShiftLeft: 2,
-      Enter: 3,
-      ArrowUp: 4,
-      ArrowDown: 5,
-      ArrowLeft: 6,
-      ArrowRight: 7
-    };
-
-    function dispatchRawKey(code, type) {
-      const meta = keyMap[code];
-      if (!meta) return;
-
-      const event = new KeyboardEvent(type, {
-        key: meta.key,
-        code: meta.code,
-        keyCode: meta.keyCode,
-        which: meta.keyCode,
-        bubbles: true,
-        cancelable: true,
-        composed: true,
-        view: window
-      });
-
-      const canvas = document.querySelector('#game canvas');
-      if (canvas) {
-        canvas.focus();
-        canvas.dispatchEvent(event);
-      }
-      window.dispatchEvent(event);
-      document.dispatchEvent(event);
-    }
-
-    function triggerKey(code, type) {
-      const isDown = (type === 'keydown');
+    // Індекси кнопок стандартного NES геймпада в EmulatorJS:
+    // 0: B, 1: A (або 8 у старих збірках, робимо автодубль), 2: SELECT, 3: START, 4: UP, 5: DOWN, 6: LEFT, 7: RIGHT
+    function sendButtonState(btnId, isDown) {
       const val = isDown ? 1 : 0;
-      const btnId = ejsBtnMap[code];
+      // Гравець 1 керує портом 0, Гравець 2 — портом 1
+      const port = (roomId && playerNum === 2) ? 1 : 0;
 
-      if (roomId && playerNum === 2) {
-        if (dataConnection && dataConnection.open) {
-          dataConnection.send({ code, btnId, val, type });
-        }
-        return;
-      }
-
-      let simulated = false;
       try {
-        if (window.EJS_emulator?.controls?.simulateButton && btnId !== undefined) {
-          window.EJS_emulator.controls.simulateButton(0, btnId, val);
-          simulated = true;
+        if (window.EJS_emulator?.controls?.simulateButton) {
+          window.EJS_emulator.controls.simulateButton(port, btnId, val);
+          // Якщо тиснуть A (id 1), додатково дублюємо 8 для сумісності версій
+          if (btnId === 1) {
+            window.EJS_emulator.controls.simulateButton(port, 8, val);
+          }
         }
       } catch (err) {}
-
-      dispatchRawKey(code, type);
     }
 
-    document.querySelectorAll('[data-key]').forEach(elem => {
-      const code = elem.getAttribute('data-key');
+    // Слухачі для екранних кнопок без вішання на весь document
+    document.querySelectorAll('[data-btn]').forEach(elem => {
+      const btnId = parseInt(elem.getAttribute('data-btn'), 10);
 
       const handlePress = (e) => {
         e.preventDefault();
@@ -605,13 +347,13 @@
         } else if (navigator.vibrate) {
           navigator.vibrate(12);
         }
-        triggerKey(code, 'keydown');
+        sendButtonState(btnId, true);
       };
 
       const handleRelease = (e) => {
         e.preventDefault();
         elem.classList.remove('pressed');
-        triggerKey(code, 'keyup');
+        sendButtonState(btnId, false);
       };
 
       elem.addEventListener('pointerdown', handlePress);
