@@ -308,12 +308,17 @@
     if (rawApp) {
       try {
         appData = JSON.parse(decodeBase64Url(rawApp));
-      } catch (e) {}
+      } catch (e) {
+        console.error("appData parse error:", e);
+      }
     }
 
     let targetRom = appData.rom || hashParams.get('rom') || urlParams.get('rom') || urlParams.get('startapp') || tg?.initDataUnsafe?.start_param;
     const roomId = appData.room || hashParams.get('room') || urlParams.get('room');
-    const playerNum = parseInt(appData.p || hashParams.get('player') || urlParams.get('player') || '1', 10);
+    
+    // Броньований чек на P2:
+    const rawP = appData.p || hashParams.get('player') || hashParams.get('p') || urlParams.get('player') || urlParams.get('p');
+    const isGuest = (rawP == 2 || rawP === '2');
 
     const brandElem = document.querySelector('.brand');
     const waitingOverlay = document.getElementById('waiting-overlay');
@@ -325,7 +330,6 @@
       if (color) brandElem.style.color = color;
     }
 
-    // Твої робочі TURN сервери Metered
     const meteredIceServers = [
       { urls: "stun:stun.relay.metered.ca:80" },
       {
@@ -347,19 +351,16 @@
       }
     };
 
-    // Відправка інпуту безпосередньо в RetroArch Wasm
     function sendCoreInput(port, btnId, val) {
-      // 1. Через стандартний simulateButton
       try {
         if (window.EJS_emulator?.controls?.simulateButton) {
           window.EJS_emulator.controls.simulateButton(port, btnId, val);
-          if (btnId === 1) { // додатковий дубль для кнопки A
+          if (btnId === 1) {
             window.EJS_emulator.controls.simulateButton(port, 8, val);
           }
         }
       } catch(e) {}
 
-      // 2. Через внутрішній менеджер гри RetroArch
       try {
         if (window.EJS_emulator?.gameManager?.setInputValue) {
           window.EJS_emulator.gameManager.setInputValue(port, btnId, val);
@@ -399,85 +400,83 @@
       document.body.appendChild(loader);
     }
 
-    if (roomId) {
-      setBrandStatus(`DENDYGRAM • DUO (P${playerNum})`, playerNum === 1 ? '#38bdf8' : '#34d399');
+    // --- РОЗДІЛЕННЯ ХОСТ / СТРІМ-КЛІЄНТ ---
+    if (roomId && isGuest) {
+      // === PLAYER 2 (КЛІЄНТ СТРІМУ) ===
+      setBrandStatus("DENDYGRAM • DUO (P2)", "#34d399");
+      waitingOverlay.style.display = 'flex';
 
-      if (playerNum === 1) {
-        // ХОСТ
-        startHostEmulator();
+      const gameDiv = document.getElementById('game');
+      if (gameDiv) gameDiv.remove(); // Видаляємо емулятор на корені
+
+      let video = document.getElementById('remote-stream-video');
+      if (!video) {
+        video = document.createElement('video');
+        video.id = 'remote-stream-video';
+        video.autoplay = true;
+        video.playsInline = true;
+        video.muted = true;
+        gameContainer.appendChild(video);
+
+        video.addEventListener('playing', () => {
+          waitingOverlay.style.display = 'none';
+          setBrandStatus("DENDYGRAM • HD STREAM LIVE", "#22c55e");
+        });
+      }
+
+      peer = new Peer(peerConfig);
+
+      peer.on('open', () => {
+        dataConn = peer.connect(hostPeerId, { reliable: false });
+      });
+
+      peer.on('call', (call) => {
+        call.answer();
+        call.on('stream', (stream) => {
+          video.srcObject = stream;
+          video.play().catch(e => console.warn("Autoplay block:", e));
+        });
+      });
+
+    } else {
+      // === ХОСТ (P1) АБО СОЛО ===
+      setBrandStatus(roomId ? "DENDYGRAM • DUO (HOST)" : "DENDYGRAM • SOLO", "#38bdf8");
+      startHostEmulator();
+
+      if (roomId) {
         peer = new Peer(hostPeerId, peerConfig);
 
         peer.on('connection', (c) => {
           dataConn = c;
           setBrandStatus("DENDYGRAM • P2 ПІДКЛЮЧЕНИЙ!", "#22c55e");
 
-          // Слухаємо інпути P2 і тиснемо в ПОРТ 1
           c.on('data', (d) => {
             if (d && d.b !== undefined) {
+              // Кнопки гостя йдуть у порт 1
               sendCoreInput(1, d.b, d.v);
             }
           });
 
           streamCanvas(c.peer);
         });
-
-      } else {
-        // PLAYER 2 (СТРІМ)
-        waitingOverlay.style.display = 'flex';
-        document.getElementById('game').style.display = 'none';
-
-        let video = document.getElementById('remote-stream-video');
-        if (!video) {
-          video = document.createElement('video');
-          video.id = 'remote-stream-video';
-          video.autoplay = true;
-          video.playsInline = true;
-          video.muted = true;
-          gameContainer.appendChild(video);
-
-          video.addEventListener('playing', () => {
-            waitingOverlay.style.display = 'none';
-            setBrandStatus("DENDYGRAM • HD STREAM LIVE", "#22c55e");
-          });
-        }
-
-        peer = new Peer(peerConfig);
-
-        peer.on('open', () => {
-          dataConn = peer.connect(hostPeerId, { reliable: false });
-        });
-
-        peer.on('call', (call) => {
-          call.answer();
-          call.on('stream', (stream) => {
-            video.srcObject = stream;
-            video.play().catch(e => console.warn("Autoplay err:", e));
-          });
-        });
       }
-    } else {
-      startHostEmulator();
     }
 
-    // Хак для чіткого 60 FPS стріму
     function streamCanvas(targetPeerId) {
       const check = setInterval(() => {
         const canvas = document.querySelector('#game canvas');
         if (canvas && canvas.width > 0 && window.EJS_emulator) {
           clearInterval(check);
 
-          // Фіксуємо 60 FPS
           const stream = canvas.captureStream(60);
           const track = stream.getVideoTracks()[0];
 
-          // Примусова піксельна чіткість без розмиття!
           if (track && 'contentHint' in track) {
             track.contentHint = 'detail';
           }
 
           const call = peer.call(targetPeerId, stream);
 
-          // Піднімаємо бітрейт через SDP, щоб не було мила
           if (call && call.peerConnection) {
             call.peerConnection.addEventListener('negotiationneeded', async () => {
               const senders = call.peerConnection.getSenders();
@@ -485,7 +484,7 @@
               if (videoSender) {
                 const params = videoSender.getParameters();
                 if (!params.encodings) params.encodings = [{}];
-                params.encodings[0].maxBitrate = 2500000; // 2.5 Mbps чистого потоку
+                params.encodings[0].maxBitrate = 2500000;
                 await videoSender.setParameters(params);
               }
             });
@@ -494,18 +493,17 @@
       }, 300);
     }
 
-    // Керування
+    // --- КЕРУВАННЯ ---
     function handlePress(btnId, isDown) {
       const val = isDown ? 1 : 0;
 
-      if (roomId && playerNum === 2) {
+      if (roomId && isGuest) {
         if (dataConn && dataConn.open) {
           dataConn.send({ b: btnId, v: val });
         }
         return;
       }
 
-      // Хост керує портом 0
       sendCoreInput(0, btnId, val);
     }
 
