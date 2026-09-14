@@ -11,6 +11,9 @@
       -webkit-touch-callout: none;
       -webkit-user-select: none;
       user-select: none;
+      /* Прибираємо синє виділення при тапах на мобілках */
+      -webkit-tap-highlight-color: transparent;
+      outline: none;
     }
 
     body {
@@ -81,11 +84,12 @@
       image-rendering: pixelated;
     }
 
-    /* Приховуємо виключно вбудований сенсорний шар та оверлей меню */
+    /* Гасимо тільки наекранний геймпад і системне меню */
     #game .ejs_virtual_gamepad,
     #game .ejs_menu,
     #game .ejs_start_screen,
-    #game [id*="controls_menu"] {
+    #game [id*="controls_menu"],
+    #game [id*="gamepad_menu"] {
       display: none !important;
       opacity: 0 !important;
       pointer-events: none !important;
@@ -269,7 +273,7 @@
       try {
         appData = JSON.parse(decodeBase64Url(rawApp));
       } catch (e) {
-        console.error("Помилка парсингу app:", e);
+        console.error("Помилка декодування:", e);
       }
     }
 
@@ -291,10 +295,9 @@
           targetRom = decodeURIComponent(targetRom);
         }
       } catch (e) {
-        console.error("Помилка декодування:", e);
+        console.error("Помилка розкодування targetRom:", e);
       }
 
-      // 1. Конфігурація нативного емулятора
       window.EJS_player = '#game';
       window.EJS_core = 'nes';
       window.EJS_gameUrl = targetRom;
@@ -305,29 +308,42 @@
       window.EJS_VirtualGamepadSettings = [0, 0];
       window.EJS_mouse = false;
 
-      // 2. Нативний Netplay через публічний ретро-сервер
+      // Примусово вказуємо підтримку двох гравців у системі керування
+      window.EJS_defaultPlayers = 2;
+
+      // Підключаємо netplay без режиму важкого ретранслятора
       if (roomId) {
         window.EJS_netplayUrl = 'wss://netplay.emulatorjs.org';
-        window.EJS_gameId = `dendy_${roomId}`;
-        window.EJS_netplayServer = true;
+        window.EJS_gameId = `nes_room_${roomId}`;
       }
+
+      // Ініціалізація геймпадів після готовності емулятора
+      window.EJS_onGameStart = () => {
+        try {
+          if (window.EJS_emulator?.controls) {
+            // Гарантуємо ініціалізацію обох портів
+            if (!window.EJS_emulator.controls.ports) {
+              window.EJS_emulator.controls.ports = [{}, {}];
+            }
+          }
+        } catch (e) {}
+      };
 
       const loader = document.createElement('script');
       loader.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
       document.body.appendChild(loader);
     }
 
-    // Індекси кнопок стандартного NES геймпада в EmulatorJS:
-    // 0: B, 1: A (або 8 у старих збірках, робимо автодубль), 2: SELECT, 3: START, 4: UP, 5: DOWN, 6: LEFT, 7: RIGHT
+    // Карта кнопок: 0: B, 1: A, 2: SELECT, 3: START, 4: UP, 5: DOWN, 6: LEFT, 7: RIGHT
     function sendButtonState(btnId, isDown) {
       const val = isDown ? 1 : 0;
-      // Гравець 1 керує портом 0, Гравець 2 — портом 1
+      // P1 керує портом 0, P2 керує портом 1
       const port = (roomId && playerNum === 2) ? 1 : 0;
 
       try {
         if (window.EJS_emulator?.controls?.simulateButton) {
           window.EJS_emulator.controls.simulateButton(port, btnId, val);
-          // Якщо тиснуть A (id 1), додатково дублюємо 8 для сумісності версій
+          // Додатковий мапінг для кнопки A
           if (btnId === 1) {
             window.EJS_emulator.controls.simulateButton(port, 8, val);
           }
@@ -335,18 +351,13 @@
       } catch (err) {}
     }
 
-    // Слухачі для екранних кнопок без вішання на весь document
+    // Обробники тапу (без haptic/vibrate і без виділень)
     document.querySelectorAll('[data-btn]').forEach(elem => {
       const btnId = parseInt(elem.getAttribute('data-btn'), 10);
 
       const handlePress = (e) => {
         e.preventDefault();
         elem.classList.add('pressed');
-        if (tg?.HapticFeedback) {
-          tg.HapticFeedback.impactOccurred('medium');
-        } else if (navigator.vibrate) {
-          navigator.vibrate(12);
-        }
         sendButtonState(btnId, true);
       };
 
