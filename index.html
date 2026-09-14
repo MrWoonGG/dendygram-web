@@ -68,6 +68,11 @@
       border-radius: 6px;
       overflow: hidden;
       position: relative;
+      /* Піксельна чіткість без розмиття */
+      image-rendering: -moz-crisp-edges;
+      image-rendering: -webkit-crisp-edges;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
     }
 
     #game {
@@ -75,7 +80,7 @@
       height: 100% !important;
     }
 
-    /* Гарантуємо, що канвас гри ЗАВЖДИ видимий */
+    #remote-stream-video,
     #game canvas {
       display: block !important;
       opacity: 1 !important;
@@ -83,9 +88,13 @@
       width: 100% !important;
       height: 100% !important;
       object-fit: contain;
+      image-rendering: -moz-crisp-edges;
+      image-rendering: -webkit-crisp-edges;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
     }
 
-    /* Вирубаємо ТІЛЬКИ системний сенсорний геймпад і меню налаштувань */
+    /* Приховуємо системний сенсорний геймпад і меню EmulatorJS */
     #game .ejs_virtual_gamepad,
     #game .ejs_menu,
     #game .ejs_start_screen,
@@ -96,7 +105,6 @@
       pointer-events: none !important;
     }
 
-    /* Екран очікування підключення */
     #waiting-overlay {
       position: absolute;
       top: 0;
@@ -302,7 +310,6 @@
       return decodeURIComponent(escape(atob(str)));
     }
 
-    // 1. Розбір параметрів із бота (#app=)
     const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
     const urlParams = new URLSearchParams(window.location.search);
 
@@ -312,7 +319,7 @@
       try {
         appData = JSON.parse(decodeBase64Url(rawApp));
       } catch (e) {
-        console.error("Помилка парсингу app payload:", e);
+        console.error("Помилка парсингу app:", e);
       }
     }
 
@@ -353,7 +360,6 @@
       waitingOverlay.style.display = show ? 'flex' : 'none';
     }
 
-    // 2. Старт емулятора для Хоста (P1) або Соло
     function startEmulator() {
       if (isEmulatorStarted || !targetRom) return;
       isEmulatorStarted = true;
@@ -384,12 +390,11 @@
       document.body.appendChild(loader);
     }
 
-    // 3. P2P WebRTC Cloud-Gaming
+    // P2P WebRTC
     if (roomId) {
       setBrandStatus(`DENDYGRAM • DUO (P${playerNum})`, playerNum === 1 ? '#38bdf8' : '#34d399');
 
       if (playerNum === 1) {
-        // --- РЕЖИМ ХОСТА (P1) ---
         startEmulator();
         peer = new Peer(hostPeerId, peerConfig);
 
@@ -397,12 +402,18 @@
           dataConnection = conn;
           setBrandStatus("DENDYGRAM • ДРУГИЙ ГРАВЕЦЬ У ГРІ!", "#22c55e");
 
-          // Обробка кнопок від P2
           conn.on('data', (data) => {
-            if (data && data.btnId !== undefined) {
-              try {
-                window.EJS_emulator?.controls?.simulateButton(1, data.btnId, data.val);
-              } catch (e) {}
+            if (!data) return;
+            let simulated = false;
+            try {
+              if (window.EJS_emulator?.controls?.simulateButton && data.btnId !== undefined) {
+                window.EJS_emulator.controls.simulateButton(1, data.btnId, data.val);
+                simulated = true;
+              }
+            } catch (e) {}
+
+            if (!simulated && data.code && data.type) {
+              dispatchRawKey(data.code, data.type);
             }
           });
 
@@ -410,7 +421,6 @@
             setBrandStatus("DENDYGRAM • P2 ВІДПАВ :(", "#eab308");
           });
 
-          // Передаємо канвас після того, як він почне малювати
           waitForCanvasAndStream(conn.peer);
         });
 
@@ -422,7 +432,6 @@
         });
 
       } else {
-        // --- РЕЖИМ ГОСТЯ (P2) ---
         setOverlay("ОЧІКУЄМО ХОСТА...", "Player 1 запускає гру. Зачекай хвилинку!");
         document.getElementById('game').style.display = 'none';
 
@@ -432,7 +441,7 @@
           remoteVideo.id = 'remote-stream-video';
           remoteVideo.autoplay = true;
           remoteVideo.playsInline = true;
-          remoteVideo.muted = true; // КРИТИЧНО: без muted мобілки не показують відео взагалі!
+          remoteVideo.muted = true;
           remoteVideo.style.cssText = 'width: 100%; height: 100%; object-fit: contain; background: #000;';
           gameContainer.appendChild(remoteVideo);
 
@@ -490,11 +499,9 @@
         });
       }
     } else {
-      // Соло гра
       startEmulator();
     }
 
-    // Захоплення відео з робочого канвасу
     function waitForCanvasAndStream(guestPeerId) {
       let attempts = 0;
       const checkInterval = setInterval(() => {
@@ -517,17 +524,52 @@
       }, 400);
     }
 
-    // 4. Керування кнопками
+    // Мапінг кнопок та клавіатури
+    const keyMap = {
+      KeyZ:       { key: 'z',          code: 'KeyZ',       keyCode: 90 },
+      KeyX:       { key: 'x',          code: 'KeyX',       keyCode: 88 },
+      ShiftLeft:  { key: 'Shift',      code: 'ShiftRight', keyCode: 16 },
+      Enter:      { key: 'Enter',      code: 'Enter',      keyCode: 13 },
+      ArrowUp:    { key: 'ArrowUp',    code: 'ArrowUp',    keyCode: 38 },
+      ArrowDown:  { key: 'ArrowDown',  code: 'ArrowDown',  keyCode: 40 },
+      ArrowLeft:  { key: 'ArrowLeft',  code: 'ArrowLeft',  keyCode: 37 },
+      ArrowRight: { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 }
+    };
+
     const ejsBtnMap = {
-      KeyZ: 0,      // B
-      KeyX: 8,      // A
-      ShiftLeft: 2, // SELECT
-      Enter: 3,     // START
+      KeyZ: 0,
+      KeyX: 8,
+      ShiftLeft: 2,
+      Enter: 3,
       ArrowUp: 4,
       ArrowDown: 5,
       ArrowLeft: 6,
       ArrowRight: 7
     };
+
+    function dispatchRawKey(code, type) {
+      const meta = keyMap[code];
+      if (!meta) return;
+
+      const event = new KeyboardEvent(type, {
+        key: meta.key,
+        code: meta.code,
+        keyCode: meta.keyCode,
+        which: meta.keyCode,
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        view: window
+      });
+
+      const canvas = document.querySelector('#game canvas');
+      if (canvas) {
+        canvas.focus();
+        canvas.dispatchEvent(event);
+      }
+      window.dispatchEvent(event);
+      document.dispatchEvent(event);
+    }
 
     function triggerKey(code, type) {
       const isDown = (type === 'keydown');
@@ -535,17 +577,21 @@
       const btnId = ejsBtnMap[code];
 
       if (roomId && playerNum === 2) {
-        if (dataConnection && dataConnection.open && btnId !== undefined) {
-          dataConnection.send({ btnId, val });
+        if (dataConnection && dataConnection.open) {
+          dataConnection.send({ code, btnId, val, type });
         }
         return;
       }
 
+      let simulated = false;
       try {
         if (window.EJS_emulator?.controls?.simulateButton && btnId !== undefined) {
           window.EJS_emulator.controls.simulateButton(0, btnId, val);
+          simulated = true;
         }
       } catch (err) {}
+
+      dispatchRawKey(code, type);
     }
 
     document.querySelectorAll('[data-key]').forEach(elem => {
