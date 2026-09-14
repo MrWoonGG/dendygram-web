@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>DendyGram</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <style>
     * {
       box-sizing: border-box;
       -webkit-touch-callout: none;
       -webkit-user-select: none;
       user-select: none;
-      /* Прибираємо синє виділення при тапах на мобілках */
       -webkit-tap-highlight-color: transparent;
       outline: none;
     }
@@ -84,12 +84,10 @@
       image-rendering: pixelated;
     }
 
-    /* Гасимо тільки наекранний геймпад і системне меню */
     #game .ejs_virtual_gamepad,
     #game .ejs_menu,
     #game .ejs_start_screen,
-    #game [id*="controls_menu"],
-    #game [id*="gamepad_menu"] {
+    #game [id*="controls_menu"] {
       display: none !important;
       opacity: 0 !important;
       pointer-events: none !important;
@@ -226,10 +224,10 @@
       <div class="main-pads">
         <div class="dpad">
           <div class="dpad-center"></div>
-          <div class="dpad-btn dpad-up" data-btn="4"></div>
-          <div class="dpad-btn dpad-down" data-btn="5"></div>
-          <div class="dpad-btn dpad-left" data-btn="6"></div>
-          <div class="dpad-btn dpad-right" data-btn="7"></div>
+          <div class="dpad-btn dpad-up" data-btn="12"></div>
+          <div class="dpad-btn dpad-down" data-btn="13"></div>
+          <div class="dpad-btn dpad-left" data-btn="14"></div>
+          <div class="dpad-btn dpad-right" data-btn="15"></div>
         </div>
 
         <div class="action-buttons">
@@ -240,11 +238,11 @@
 
       <div class="system-pads">
         <div class="sys-btn-wrap">
-          <div class="sys-btn" data-btn="2"></div>
+          <div class="sys-btn" data-btn="8"></div>
           <span class="sys-label">SELECT</span>
         </div>
         <div class="sys-btn-wrap">
-          <div class="sys-btn" data-btn="3"></div>
+          <div class="sys-btn" data-btn="9"></div>
           <span class="sys-label">START</span>
         </div>
       </div>
@@ -252,6 +250,44 @@
   </div>
 
   <script>
+    // --- 1. ВІРТУАЛЬНИЙ ХАК ДЛЯ HTML5 GAMEPAD API ---
+    // Створюємо 2 повноцінні апаратні геймпади для браузера
+    function makeGamepad(index, id) {
+      const buttons = [];
+      for (let i = 0; i < 17; i++) {
+        buttons.push({ pressed: false, touched: false, value: 0.0 });
+      }
+      return {
+        id: id,
+        index: index,
+        connected: true,
+        mapping: 'standard',
+        timestamp: performance.now(),
+        axes: [0.0, 0.0, 0.0, 0.0],
+        buttons: buttons
+      };
+    }
+
+    const virtualGamepads = [
+      makeGamepad(0, "Dendy Controller P1 (STANDARD GAMEPAD)"),
+      makeGamepad(1, "Dendy Controller P2 (STANDARD GAMEPAD)")
+    ];
+
+    // Підміняємо API браузера, щоб емулятор БАЧИВ ДВА ДЖОЙСТИКИ
+    navigator.getGamepads = function() {
+      virtualGamepads[0].timestamp = performance.now();
+      virtualGamepads[1].timestamp = performance.now();
+      return virtualGamepads;
+    };
+
+    function setVirtualButton(playerIdx, btnIdx, isPressed) {
+      if (virtualGamepads[playerIdx] && virtualGamepads[playerIdx].buttons[btnIdx]) {
+        virtualGamepads[playerIdx].buttons[btnIdx].pressed = isPressed;
+        virtualGamepads[playerIdx].buttons[btnIdx].value = isPressed ? 1.0 : 0.0;
+      }
+    }
+
+    // --- 2. ПАРСИНГ ПАРАМЕТРІВ ---
     const tg = window.Telegram?.WebApp;
     if (tg) {
       tg.expand();
@@ -272,9 +308,7 @@
     if (rawApp) {
       try {
         appData = JSON.parse(decodeBase64Url(rawApp));
-      } catch (e) {
-        console.error("Помилка декодування:", e);
-      }
+      } catch (e) {}
     }
 
     let targetRom = appData.rom || hashParams.get('rom') || urlParams.get('rom') || urlParams.get('startapp') || tg?.initDataUnsafe?.start_param;
@@ -283,10 +317,11 @@
 
     const brandElem = document.querySelector('.brand');
     if (roomId && brandElem) {
-      brandElem.textContent = `DENDYGRAM • DUO (PLAYER ${playerNum})`;
+      brandElem.textContent = `DENDYGRAM • DUO (P${playerNum})`;
       brandElem.style.color = playerNum === 1 ? '#38bdf8' : '#34d399';
     }
 
+    // --- 3. ЗАПУСК ЕМУЛЯТОРА (БЕЗ ЖОДНИХ НЕТПЛЕЇВ ТА СТРІМІВ) ---
     if (targetRom) {
       try {
         if (!targetRom.startsWith('http')) {
@@ -294,9 +329,7 @@
         } else {
           targetRom = decodeURIComponent(targetRom);
         }
-      } catch (e) {
-        console.error("Помилка розкодування targetRom:", e);
-      }
+      } catch (e) {}
 
       window.EJS_player = '#game';
       window.EJS_core = 'nes';
@@ -308,69 +341,85 @@
       window.EJS_VirtualGamepadSettings = [0, 0];
       window.EJS_mouse = false;
 
-      // Примусово вказуємо підтримку двох гравців у системі керування
-      window.EJS_defaultPlayers = 2;
-
-      // Підключаємо netplay без режиму важкого ретранслятора
-      if (roomId) {
-        window.EJS_netplayUrl = 'wss://netplay.emulatorjs.org';
-        window.EJS_gameId = `nes_room_${roomId}`;
-      }
-
-      // Ініціалізація геймпадів після готовності емулятора
-      window.EJS_onGameStart = () => {
-        try {
-          if (window.EJS_emulator?.controls) {
-            // Гарантуємо ініціалізацію обох портів
-            if (!window.EJS_emulator.controls.ports) {
-              window.EJS_emulator.controls.ports = [{}, {}];
-            }
-          }
-        } catch (e) {}
-      };
+      // Жодних сторонніх сокетів netplay! Чистий локальний 60 FPS рендер
+      delete window.EJS_netplayUrl;
 
       const loader = document.createElement('script');
       loader.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
       document.body.appendChild(loader);
     }
 
-    // Карта кнопок: 0: B, 1: A, 2: SELECT, 3: START, 4: UP, 5: DOWN, 6: LEFT, 7: RIGHT
-    function sendButtonState(btnId, isDown) {
-      const val = isDown ? 1 : 0;
-      // P1 керує портом 0, P2 керує портом 1
-      const port = (roomId && playerNum === 2) ? 1 : 0;
+    // --- 4. МЕРЕЖА: ЛИШЕ ПЕРЕДАЧА СТАНУ ДЖОЙСТИКА P2 ---
+    let peer = null;
+    let conn = null;
 
-      try {
-        if (window.EJS_emulator?.controls?.simulateButton) {
-          window.EJS_emulator.controls.simulateButton(port, btnId, val);
-          // Додатковий мапінг для кнопки A
-          if (btnId === 1) {
-            window.EJS_emulator.controls.simulateButton(port, 8, val);
-          }
-        }
-      } catch (err) {}
+    if (roomId) {
+      const peerId = `dendygram_pad_room_${roomId}`;
+
+      if (playerNum === 1) {
+        // ХОСТ: слухає кнопки P2
+        peer = new Peer(peerId);
+        peer.on('connection', (c) => {
+          conn = c;
+          brandElem.textContent = "DENDYGRAM • P2 CONNECTED!";
+          brandElem.style.color = "#22c55e";
+
+          conn.on('data', (data) => {
+            if (data && data.btn !== undefined) {
+              setVirtualButton(1, data.btn, data.down); // пишемо в P2
+            }
+          });
+        });
+      } else {
+        // PLAYER 2: підключається до хоста і відправляє свої тапи
+        peer = new Peer();
+        peer.on('open', () => {
+          conn = peer.connect(peerId, { reliable: false }); // UDP режим для мілісекундного відгуку
+          conn.on('open', () => {
+            brandElem.textContent = "DENDYGRAM • READY (P2)";
+            brandElem.style.color = "#22c55e";
+          });
+        });
+      }
     }
 
-    // Обробники тапу (без haptic/vibrate і без виділень)
-    document.querySelectorAll('[data-btn]').forEach(elem => {
-      const btnId = parseInt(elem.getAttribute('data-btn'), 10);
+    // Стандартні індекси HTML5 Gamepad:
+    // 0: B, 1: A, 8: Select, 9: Start, 12: D-Up, 13: D-Down, 14: D-Left, 15: D-Right
+    function handleButton(btnIdx, isDown) {
+      if (roomId && playerNum === 2) {
+        // Другий гравець шле пакет хосту
+        if (conn && conn.open) {
+          conn.send({ btn: btnIdx, down: isDown });
+        }
+        // І дублює локально в свій емулятор (якщо запустив гру для синхрону)
+        setVirtualButton(1, btnIdx, isDown);
+        return;
+      }
 
-      const handlePress = (e) => {
+      // Хост пише напряму в перший віртуальний контролер
+      setVirtualButton(0, btnIdx, isDown);
+    }
+
+    // Прив'язка кнопок
+    document.querySelectorAll('[data-btn]').forEach(elem => {
+      const btn = parseInt(elem.getAttribute('data-btn'), 10);
+
+      const down = (e) => {
         e.preventDefault();
         elem.classList.add('pressed');
-        sendButtonState(btnId, true);
+        handleButton(btn, true);
       };
 
-      const handleRelease = (e) => {
+      const up = (e) => {
         e.preventDefault();
         elem.classList.remove('pressed');
-        sendButtonState(btnId, false);
+        handleButton(btn, false);
       };
 
-      elem.addEventListener('pointerdown', handlePress);
-      elem.addEventListener('pointerup', handleRelease);
-      elem.addEventListener('pointercancel', handleRelease);
-      elem.addEventListener('pointerleave', handleRelease);
+      elem.addEventListener('pointerdown', down);
+      elem.addEventListener('pointerup', up);
+      elem.addEventListener('pointercancel', up);
+      elem.addEventListener('pointerleave', up);
     });
   </script>
 </body>
