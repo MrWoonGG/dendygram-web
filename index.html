@@ -6,7 +6,7 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>DendyGram Real Cloud 60FPS</title>
+  <title>DendyGram 30FPS Low-Latency</title>
   
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -332,15 +332,15 @@
     <div class="screen-bezel">
       <div id="game-container">
         <div id="game"></div>
-        <video id="cloud-video" autoplay playsinline muted></video>
+        <video id="cloud-video" autoplay playsinline webkit-playsinline muted></video>
         <div id="waiting-overlay">
           <div class="spinner"></div>
           <div id="overlay-msg" style="font-weight: 700; font-size: 14px; margin-bottom: 6px;">ПІДКЛЮЧЕННЯ...</div>
-          <div id="overlay-sub" style="color: #71717a; font-size: 11px;">Ініціалізація низьколатентного стріму...</div>
+          <div id="overlay-sub" style="color: #71717a; font-size: 11px;">Очікування 30 FPS стріму...</div>
           <button id="play-trigger-btn">▶ УВІЙТИ В ГРУ</button>
         </div>
       </div>
-      <div class="brand">DENDYGRAM • LOW-LATENCY CLOUD</div>
+      <div class="brand">DENDYGRAM • 30 FPS CLOUD</div>
     </div>
 
     <div class="logger-wrapper">
@@ -450,6 +450,23 @@
     const overlaySub = document.getElementById('overlay-sub');
 
     // ==========================================
+    // ЛОГУВАННЯ СТАТУСІВ ВІДЕОПЛЕЄРА ГОСТЯ
+    // ==========================================
+    if (cloudVideo) {
+      cloudVideo.addEventListener('loadedmetadata', () => {
+        logScreen(`Відео: metadata (${cloudVideo.videoWidth}x${cloudVideo.videoHeight})`, "info");
+      });
+      cloudVideo.addEventListener('playing', () => {
+        logScreen("Відео: рендер почався (PLAYING)", "info");
+        waitingOverlay.style.display = 'none';
+        setBrandStatus("DENDYGRAM • 30 FPS LIVE", "#22c55e");
+      });
+      cloudVideo.addEventListener('waiting', () => logScreen("Відео: очікування буфера...", "warn"));
+      cloudVideo.addEventListener('stalled', () => logScreen("Відео: потік завис (stalled)", "warn"));
+      cloudVideo.addEventListener('error', (e) => logScreen(`Відео err: ${cloudVideo.error?.message}`, "err"));
+    }
+
+    // ==========================================
     // ВІРТУАЛЬНІ GAMEPAD ДЛЯ RETROARCH
     // ==========================================
     window.__virtualPads = [
@@ -513,16 +530,6 @@
       }
     }
 
-    // ==========================================
-    // LOW-LATENCY SDP HACK (H.264 Baseline, 0 B-frames)
-    // ==========================================
-    function optimizeSdp(sdp) {
-      return sdp.replace(/a=fmtp:(\d+) (.*)/g, (match, pt, params) => {
-        // Додаємо прапорці нульової затримки для відео
-        return `${match};x-google-min-bitrate=1000;x-google-max-bitrate=2000;packetization-mode=1`;
-      });
-    }
-
     const meteredIceServers = [
       { urls: "stun:stun.relay.metered.ca:80" },
       { urls: "turn:global.relay.metered.ca:80", username: "d7695a22150cfea32f5b287e", credential: "Jm8+83G3JIEbY+Dj" },
@@ -538,7 +545,7 @@
 
     let peer = null;
     let dataConn = null;
-    const hostPeerId = `dendygram_fast_${roomId}`;
+    const hostPeerId = `dendygram_30fps_${roomId}`;
 
     if (roomId && isGuest) {
       // === P2 GUEST ===
@@ -547,15 +554,18 @@
       cloudVideo.style.display = 'block';
       waitingOverlay.style.display = 'flex';
 
-      function unlockAudioVideo() {
-        cloudVideo.muted = false;
+      function forcePlayVideo() {
+        logScreen("Ручний запуск відео...", "info");
+        cloudVideo.muted = true; // стартуємо з muted для гарантованого пробиття автоплею
         cloudVideo.play().then(() => {
           waitingOverlay.style.display = 'none';
-          setBrandStatus("DENDYGRAM • LOW-LATENCY 60FPS", "#22c55e");
-          logScreen("Потік розблоковано!", "info");
-        }).catch(e => logScreen(`Play err: ${e.message}`, "err"));
+          cloudVideo.muted = false; // вмикаємо звук після розблокування
+          logScreen("Відео грає!", "info");
+        }).catch(err => {
+          logScreen(`Play помилка: ${err.message}`, "err");
+        });
       }
-      playTriggerBtn.addEventListener('click', unlockAudioVideo);
+      playTriggerBtn.addEventListener('click', forcePlayVideo);
 
       peer = new Peer(peerConfig);
       peer.on('open', (id) => {
@@ -563,38 +573,45 @@
         dataConn = peer.connect(hostPeerId, { reliable: true });
 
         dataConn.on('open', () => {
-          logScreen("Канал керування підключено!", "info");
+          logScreen("Канал керування з'єднано!", "info");
         });
         dataConn.on('error', (e) => logScreen(`DataConn err: ${e}`, 'err'));
       });
 
       peer.on('call', (call) => {
-        logScreen("З'єднання дзвінка...", "info");
+        logScreen("Отримано виклик потоку! Підключаємо...", "info");
         call.answer();
 
         if (call.peerConnection) {
           call.peerConnection.ontrack = (event) => {
+            logScreen(`Track отримано: kind=${event.track.kind}`, "info");
             if (event.receiver) {
               try {
                 if ('playoutDelayHint' in event.receiver) event.receiver.playoutDelayHint = 0;
                 if ('jitterBufferTarget' in event.receiver) event.receiver.jitterBufferTarget = 0;
               } catch(e) {}
             }
-            cloudVideo.srcObject = event.streams[0];
+            if (event.streams && event.streams[0]) {
+              cloudVideo.srcObject = event.streams[0];
+            }
           };
         }
 
         call.on('stream', (remoteStream) => {
+          logScreen(`Stream прибув: tracks=${remoteStream.getTracks().length}`, "info");
           cloudVideo.srcObject = remoteStream;
+
+          // Спроба автоматичного старту
           cloudVideo.play().then(() => {
             waitingOverlay.style.display = 'none';
-            setBrandStatus("DENDYGRAM • LOW-LATENCY 60FPS", "#22c55e");
-            logScreen("Стрім активний з нульовим буфером!", "info");
-          }).catch(() => {
+            setBrandStatus("DENDYGRAM • 30 FPS LIVE", "#22c55e");
+            logScreen("Автоплей 30 FPS успішний!", "info");
+          }).catch((err) => {
+            logScreen(`Автоплей блок (${err.name}). Тисни кнопку!`, "warn");
             const spinner = document.querySelector('.spinner');
             if (spinner) spinner.style.display = 'none';
-            overlayMsg.textContent = "ПОТІК ПРИЙНЯТО!";
-            overlaySub.textContent = "Торкнись для миттєвого старту";
+            overlayMsg.textContent = "ПОТІК ГОТОВИЙ!";
+            overlaySub.textContent = "Натисни кнопку нижче для запуску гри";
             playTriggerBtn.style.display = 'block';
           });
         });
@@ -649,7 +666,7 @@
             }
           });
 
-          initLowLatencyStream(c.peer);
+          initFastStream(c.peer);
         });
 
         peer.on('error', (err) => logScreen(`Peer хоста: ${err.type}`, "err"));
@@ -657,18 +674,19 @@
     }
 
     // ==========================================
-    // ІНІЦІАЛІЗАЦІЯ ШВИДКОГО ПОТОКУ (0 LATENCY)
+    // СТРІМ НА 30 FPS З МІНІМАЛЬНИМ ПІНГОМ
     // ==========================================
-    function initLowLatencyStream(guestId) {
+    function initFastStream(guestId) {
       let tries = 0;
       const t = setInterval(() => {
         tries++;
         const canvas = document.querySelector('#game canvas');
         if (canvas && canvas.width > 50) {
           clearInterval(t);
-          logScreen(`Канвас (${canvas.width}x${canvas.height}). Формуємо 60 FPS стрім...`, "info");
+          logScreen(`Канвас (${canvas.width}x${canvas.height}). Формуємо 30 FPS стрім...`, "info");
           try {
-            const stream = canvas.captureStream(60);
+            // Фіксуємо 30 FPS для меншого навантаження
+            const stream = canvas.captureStream(30);
             const vTrack = stream.getVideoTracks()[0];
             if (vTrack && 'contentHint' in vTrack) {
               vTrack.contentHint = 'detail';
@@ -685,17 +703,17 @@
                   if (vSender) {
                     const p = vSender.getParameters();
                     if (!p.encodings) p.encodings = [{}];
-                    p.encodings[0].maxBitrate = 1500000; // 1.5 Mbps — без буферизації
-                    p.encodings[0].maxFramerate = 60;
-                    p.encodings[0].networkPriority = 'high';
+                    p.encodings[0].maxBitrate = 1200000; // 1.2 Mbps для 30 FPS — кадри вилітають миттєво
+                    p.encodings[0].maxFramerate = 30;
                     p.encodings[0].priority = 'high';
+                    p.encodings[0].networkPriority = 'high';
                     await vSender.setParameters(p);
                   }
                 } catch(e) {}
               });
             }
 
-            logScreen("Ультра-стрім надіслано гостю!", "info");
+            logScreen("30 FPS стрім передано гостю!", "info");
           } catch(e) {
             logScreen(`Помилка captureStream: ${e.message}`, "err");
           }
@@ -708,7 +726,7 @@
     }
 
     // ==========================================
-    // КНОПКИ
+    // ОБРОБКА КНОПОК
     // ==========================================
     function handleButtonAction(btnId, isDown) {
       const val = isDown ? 1 : 0;
