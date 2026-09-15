@@ -2,11 +2,11 @@
 <html lang="uk">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate, max-age=0" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>DendyGram Fix</title>
+  <title>DendyGram No-Cache</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <style>
@@ -386,7 +386,7 @@
     setBrandStatus(`DENDYGRAM • ${isGuest ? 'P2 (GUEST)' : 'P1 (HOST)'}`, isGuest ? '#34d399' : '#38bdf8');
     logScreen(`Роль: ${isGuest ? 'P2' : 'P1'} | Кімната: ${roomId || 'Соло'}`);
 
-    // --- КЛАВІШІ ДЛЯ ДВОХ ГРАВЦІВ ---
+    // Клавіші для обох гравців
     const p1Keys = {
       0: { code: 'KeyZ', key: 'z', keyCode: 90 },
       8: { code: 'KeyX', key: 'x', keyCode: 88 },
@@ -431,12 +431,19 @@
       }
     }
 
-    // --- ЧИСТИЙ СТАРТ ЕМУЛЯТОРА БЕЗ КРАШ-ПАРАМЕТРІВ ---
+    // Безпечний парсинг URL ROM
     let cleanRom = targetRom;
     try {
-      if (!cleanRom.startsWith('http')) cleanRom = decodeBase64Url(cleanRom);
-      else cleanRom = decodeURIComponent(cleanRom);
-    } catch (e) {}
+      if (cleanRom.startsWith('http')) {
+        try { cleanRom = decodeURIComponent(cleanRom); } catch(e) {}
+      } else {
+        cleanRom = decodeBase64Url(cleanRom);
+      }
+    } catch (e) {
+      logScreen("Помилка обробки ROM, беремо сирий лінк", "warn");
+    }
+
+    logScreen("Запуск EmulatorJS...", "info");
 
     window.EJS_player = '#game';
     window.EJS_core = 'nes';
@@ -448,14 +455,14 @@
     window.EJS_VirtualGamepadSettings = [0, 0];
     window.EJS_mouse = false;
 
-    logScreen("Завантаження loader.js...", "info");
     const loader = document.createElement('script');
     loader.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
+    loader.async = true;
     loader.onload = () => logScreen("loader.js завантажено успішно!");
     loader.onerror = () => logScreen("CDN loader.js недоступний!", "err");
-    document.body.appendChild(loader);
+    document.head.appendChild(loader);
 
-    // --- P2P ПІДКЛЮЧЕННЯ ---
+    // Підключення PeerJS
     const meteredIceServers = [
       { urls: "stun:stun.relay.metered.ca:80" },
       { urls: "turn:global.relay.metered.ca:80", username: "d7695a22150cfea32f5b287e", credential: "Jm8+83G3JIEbY+Dj" },
@@ -471,12 +478,11 @@
       const peerConfig = { config: { iceServers: meteredIceServers } };
 
       if (!isGuest) {
-        // ХОСТ
         peer = new Peer(hostPeerId, peerConfig);
         peer.on('connection', (c) => {
           dataConn = c;
           setBrandStatus("DENDYGRAM • DUO ONLINE!", "#22c55e");
-          logScreen("P2 зайшов! Стрім стейту 100мс активовано", "info");
+          logScreen("P2 зайшов! Стрім стейту активовано", "info");
 
           c.on('data', (d) => {
             if (d.t === 'INP') {
@@ -488,7 +494,6 @@
           streamInterval = setInterval(broadcastState, 100);
         });
       } else {
-        // ГІСТЬ
         peer = new Peer(peerConfig);
         peer.on('open', () => {
           dataConn = peer.connect(hostPeerId, { reliable: false });
