@@ -6,7 +6,7 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>DendyGram Direct Input</title>
+  <title>DendyGram Docs-Accurate Duo</title>
   
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -334,7 +334,7 @@
         <div id="waiting-overlay">
           <div class="spinner"></div>
           <div id="overlay-msg" style="font-weight: 700; font-size: 14px; margin-bottom: 6px;">ПІДКЛЮЧЕННЯ...</div>
-          <div id="overlay-sub" style="color: #71717a; font-size: 11px;">Ініціалізація з'єднання...</div>
+          <div id="overlay-sub" style="color: #71717a; font-size: 11px;">Очікування відеопотоку...</div>
           <button id="play-trigger-btn">▶ УВІЙТИ В ГРУ</button>
         </div>
       </div>
@@ -447,11 +447,11 @@
     const overlayMsg = document.getElementById('overlay-msg');
     const overlaySub = document.getElementById('overlay-sub');
 
-    // КАРТА СИНТЕТИЧНИХ КЛАВІШ
-    const p1KeyMap = {
-      0: { key: 'z', code: 'KeyZ', keyCode: 90 },
-      8: { key: 'x', code: 'KeyX', keyCode: 88 },
-      2: { key: 'Shift', code: 'ShiftLeft', keyCode: 16 },
+    // КЛАВІШІ ДЛЯ P1 ТА P2 (СТРОГО ЗА ДОКУМЕНТАЦІЄЮ EJS)
+    const p1Keys = {
+      0: { key: 'x', code: 'KeyX', keyCode: 88 },
+      8: { key: 'z', code: 'KeyZ', keyCode: 90 },
+      2: { key: 'v', code: 'KeyV', keyCode: 86 },
       3: { key: 'Enter', code: 'Enter', keyCode: 13 },
       4: { key: 'ArrowUp', code: 'ArrowUp', keyCode: 38 },
       5: { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40 },
@@ -459,83 +459,51 @@
       7: { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 }
     };
 
-    const p2KeyMap = {
-      0: { key: 'u', code: 'KeyU', keyCode: 85 },
-      8: { key: 'o', code: 'KeyO', keyCode: 79 },
-      2: { key: 'y', code: 'KeyY', keyCode: 89 },
-      3: { key: 'h', code: 'KeyH', keyCode: 72 },
-      4: { key: 'i', code: 'KeyI', keyCode: 73 },
-      5: { key: 'k', code: 'KeyK', keyCode: 75 },
-      6: { key: 'j', code: 'KeyJ', keyCode: 74 },
-      7: { key: 'l', code: 'KeyL', keyCode: 76 }
+    const p2Keys = {
+      0: { key: 'u', code: 'KeyU', keyCode: 85 }, // B
+      8: { key: 'o', code: 'KeyO', keyCode: 79 }, // A
+      2: { key: 'y', code: 'KeyY', keyCode: 89 }, // SELECT
+      3: { key: 'h', code: 'KeyH', keyCode: 72 }, // START
+      4: { key: 'i', code: 'KeyI', keyCode: 73 }, // UP
+      5: { key: 'k', code: 'KeyK', keyCode: 75 }, // DOWN
+      6: { key: 'j', code: 'KeyJ', keyCode: 74 }, // LEFT
+      7: { key: 'l', code: 'KeyL', keyCode: 76 }  // RIGHT
     };
 
-    // БРОНЬОВАНИЙ ІНПУТ ДЛЯ RETROARCH
     function sendEjsInput(port, btnId, val) {
-      const emu = window.EJS_emulator;
-      const isDown = (val === 1);
+      const map = (port === 1) ? p2Keys : p1Keys;
+      const k = map[btnId];
+      if (!k) return;
 
-      // 1. Пряме введення в порт ядра (якщо доступно)
-      try {
-        if (emu?.gameManager?.setInputValue) {
-          emu.gameManager.setInputValue(port, btnId, val);
-        }
-      } catch (e) {}
+      const evType = (val === 1) ? 'keydown' : 'keyup';
+      const canvas = document.querySelector('#game canvas');
 
-      try {
-        if (emu?.controls?.simulateButton) {
-          emu.controls.simulateButton(port, btnId, val);
-        }
-      } catch (e) {}
+      function emit(targetKey, targetCode, targetCodeNum) {
+        const ev = new KeyboardEvent(evType, {
+          key: targetKey,
+          code: targetCode,
+          keyCode: targetCodeNum,
+          which: targetCodeNum,
+          bubbles: true,
+          cancelable: true,
+          view: window
+        });
 
-      // 2. Спеціальний комбінований залп для P1
-      if (port === 0) {
-        const evType = isDown ? 'keydown' : 'keyup';
-        const canvas = document.querySelector('#game canvas');
-        function fireKey(k, c, codeNum) {
-          const ev = new KeyboardEvent(evType, {
-            key: k, code: c, keyCode: codeNum, which: codeNum,
-            bubbles: true, cancelable: true, view: window
-          });
-          if (canvas) canvas.dispatchEvent(ev);
-          window.dispatchEvent(ev);
-        }
-
-        if (btnId === 2) {
-          // SELECT (надійне перемикання меню 2 Players)
-          fireKey('Shift', 'ShiftLeft', 16);
-          fireKey('Shift', 'ShiftRight', 16);
-          fireKey('v', 'KeyV', 86);
-        } else if (btnId === 3) fireKey('Enter', 'Enter', 13);
-        else if (btnId === 0) fireKey('z', 'KeyZ', 90);
-        else if (btnId === 8) fireKey('x', 'KeyX', 88);
-        else if (btnId === 4) fireKey('ArrowUp', 'ArrowUp', 38);
-        else if (btnId === 5) fireKey('ArrowDown', 'ArrowDown', 40);
-        else if (btnId === 6) fireKey('ArrowLeft', 'ArrowLeft', 37);
-        else if (btnId === 7) fireKey('ArrowRight', 'ArrowRight', 39);
-        return true;
+        window.dispatchEvent(ev);
+        document.dispatchEvent(ev);
+        if (canvas) canvas.dispatchEvent(ev);
       }
 
-      // 3. Синтетичні клавіші для P2
-      if (port === 1) {
-        const k = p2KeyMap[btnId];
-        if (k) {
-          const evType = isDown ? 'keydown' : 'keyup';
-          const canvas = document.querySelector('#game canvas');
-          const ev = new KeyboardEvent(evType, {
-            key: k.key, code: k.code, keyCode: k.keyCode, which: k.keyCode,
-            bubbles: true, cancelable: true, view: window
-          });
-          if (canvas) canvas.dispatchEvent(ev);
-          window.dispatchEvent(ev);
-        }
-        return true;
-      }
+      // Основна клавіша
+      emit(k.key, k.code, k.keyCode);
 
-      return false;
+      // Дублюючий залп для P1 Select
+      if (port === 0 && btnId === 2) {
+        emit('Shift', 'ShiftLeft', 16);
+      }
     }
 
-    // ICE сервери
+    // МЕРЕЖА PEERJS
     const meteredIceServers = [
       { urls: "stun:stun.relay.metered.ca:80" },
       { urls: "turn:global.relay.metered.ca:80", username: "d7695a22150cfea32f5b287e", credential: "Jm8+83G3JIEbY+Dj" },
@@ -548,7 +516,7 @@
     const hostPeerId = `dendygram_cloud_${roomId}`;
 
     if (roomId && isGuest) {
-      // === P2 (ГІСТЬ) ===
+      // === КЛІЄНТ (P2) ===
       setBrandStatus("DENDYGRAM • P2 GUEST", "#34d399");
       gameDiv.style.display = 'none';
       cloudVideo.style.display = 'block';
@@ -560,14 +528,14 @@
           waitingOverlay.style.display = 'none';
           setBrandStatus("DENDYGRAM • DUO LIVE", "#22c55e");
           logScreen("Стрім запущено!", "info");
-        }).catch(e => logScreen(`Помилка play: ${e.message}`, "err"));
+        }).catch(e => logScreen(`Play err: ${e.message}`, "err"));
       }
 
       playTriggerBtn.addEventListener('click', unlockVideo);
 
       peer = new Peer(peerConfig);
       peer.on('open', (id) => {
-        logScreen(`P2 підключено до сигналки: ${id.substring(0, 6)}`);
+        logScreen(`P2 зареєстровано: ${id.substring(0, 6)}`);
         dataConn = peer.connect(hostPeerId, { reliable: true });
 
         dataConn.on('open', () => {
@@ -577,7 +545,7 @@
       });
 
       peer.on('call', (call) => {
-        logScreen("Прийнято відеодзвінок від хоста!", "info");
+        logScreen("Отримано відеопотік від хоста!", "info");
         call.answer();
         call.on('stream', (remoteStream) => {
           cloudVideo.srcObject = remoteStream;
@@ -587,11 +555,11 @@
             setBrandStatus("DENDYGRAM • DUO LIVE", "#22c55e");
             logScreen("Автоплей активний!", "info");
           }).catch(() => {
-            logScreen("Браузер вимагає кліку для звуку", "warn");
+            logScreen("Браузер блокує звук: тисни кнопку!", "warn");
             const spinner = document.querySelector('.spinner');
             if (spinner) spinner.style.display = 'none';
             overlayMsg.textContent = "СТРІМ ГОТОВИЙ!";
-            overlaySub.textContent = "Торкнись кнопки нижче для входу в гру";
+            overlaySub.textContent = "Торкнись кнопки для активації гри";
             playTriggerBtn.style.display = 'block';
           });
         });
@@ -600,7 +568,7 @@
       peer.on('error', (err) => logScreen(`Peer P2 err: ${err.type}`, "err"));
 
     } else {
-      // === P1 (ХОСТ) ===
+      // === ХОСТ (P1) ===
       setBrandStatus(roomId ? "DENDYGRAM • HOSTING" : "DENDYGRAM • SOLO", "#38bdf8");
 
       let cleanRom = targetRom;
@@ -609,6 +577,7 @@
         else cleanRom = decodeURIComponent(cleanRom);
       } catch (e) {}
 
+      // ОФІЦІЙНА КОНФІГУРАЦІЯ ОБОХ ПЛЕЄРІВ ЗА ДОКУМЕНТАЦІЄЮ
       window.EJS_player = '#game';
       window.EJS_core = 'nes';
       window.EJS_gameUrl = cleanRom;
@@ -620,16 +589,27 @@
       window.EJS_mouse = false;
       window.EJS_defaultPlayers = 2;
 
-      // Хук старту гри: активуємо Port 1 для другого гравця
-      window.EJS_onGameStart = function() {
-        logScreen("Гра стартувала! Ініціалізуємо Port 2...", "info");
-        try {
-          const gm = window.EJS_emulator?.gameManager;
-          if (gm && gm.setDevice) {
-            gm.setDevice(1, 1);
-            logScreen("Port 2 активовано як Joypad!", "info");
-          }
-        } catch(e) {}
+      window.EJS_defaultControls = {
+        0: {
+          0: { 'value': 'x' },          // B
+          8: { 'value': 'z' },          // A
+          2: { 'value': 'v' },          // SELECT
+          3: { 'value': 'enter' },      // START
+          4: { 'value': 'up arrow' },   // UP
+          5: { 'value': 'down arrow' }, // DOWN
+          6: { 'value': 'left arrow' }, // LEFT
+          7: { 'value': 'right arrow' } // RIGHT
+        },
+        1: {
+          0: { 'value': 'u' },          // B
+          8: { 'value': 'o' },          // A
+          2: { 'value': 'y' },          // SELECT
+          3: { 'value': 'h' },          // START
+          4: { 'value': 'i' },          // UP
+          5: { 'value': 'k' },          // DOWN
+          6: { 'value': 'j' },          // LEFT
+          7: { 'value': 'l' }           // RIGHT
+        }
       };
 
       logScreen("Завантажуємо loader.js...", "info");
