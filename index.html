@@ -6,7 +6,7 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>DendyGram Stream Fix</title>
+  <title>DendyGram Direct Input</title>
   
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -447,7 +447,7 @@
     const overlayMsg = document.getElementById('overlay-msg');
     const overlaySub = document.getElementById('overlay-sub');
 
-    // КЛАВІАТУРНІ БІНДИ
+    // КАРТА СИНТЕТИЧНИХ КЛАВІШ
     const p1KeyMap = {
       0: { key: 'z', code: 'KeyZ', keyCode: 90 },
       8: { key: 'x', code: 'KeyX', keyCode: 88 },
@@ -470,27 +470,69 @@
       7: { key: 'l', code: 'KeyL', keyCode: 76 }
     };
 
+    // БРОНЬОВАНИЙ ІНПУТ ДЛЯ RETROARCH
     function sendEjsInput(port, btnId, val) {
-      const map = (port === 1) ? p2KeyMap : p1KeyMap;
-      const k = map[btnId];
-      if (!k) return false;
+      const emu = window.EJS_emulator;
+      const isDown = (val === 1);
 
-      const evType = (val === 1) ? 'keydown' : 'keyup';
-      const canvas = document.querySelector('#game canvas');
+      // 1. Пряме введення в порт ядра (якщо доступно)
+      try {
+        if (emu?.gameManager?.setInputValue) {
+          emu.gameManager.setInputValue(port, btnId, val);
+        }
+      } catch (e) {}
 
-      const ev = new KeyboardEvent(evType, {
-        key: k.key,
-        code: k.code,
-        keyCode: k.keyCode,
-        which: k.keyCode,
-        bubbles: true,
-        cancelable: true,
-        view: window
-      });
+      try {
+        if (emu?.controls?.simulateButton) {
+          emu.controls.simulateButton(port, btnId, val);
+        }
+      } catch (e) {}
 
-      if (canvas) canvas.dispatchEvent(ev);
-      window.dispatchEvent(ev);
-      return true;
+      // 2. Спеціальний комбінований залп для P1
+      if (port === 0) {
+        const evType = isDown ? 'keydown' : 'keyup';
+        const canvas = document.querySelector('#game canvas');
+        function fireKey(k, c, codeNum) {
+          const ev = new KeyboardEvent(evType, {
+            key: k, code: c, keyCode: codeNum, which: codeNum,
+            bubbles: true, cancelable: true, view: window
+          });
+          if (canvas) canvas.dispatchEvent(ev);
+          window.dispatchEvent(ev);
+        }
+
+        if (btnId === 2) {
+          // SELECT (надійне перемикання меню 2 Players)
+          fireKey('Shift', 'ShiftLeft', 16);
+          fireKey('Shift', 'ShiftRight', 16);
+          fireKey('v', 'KeyV', 86);
+        } else if (btnId === 3) fireKey('Enter', 'Enter', 13);
+        else if (btnId === 0) fireKey('z', 'KeyZ', 90);
+        else if (btnId === 8) fireKey('x', 'KeyX', 88);
+        else if (btnId === 4) fireKey('ArrowUp', 'ArrowUp', 38);
+        else if (btnId === 5) fireKey('ArrowDown', 'ArrowDown', 40);
+        else if (btnId === 6) fireKey('ArrowLeft', 'ArrowLeft', 37);
+        else if (btnId === 7) fireKey('ArrowRight', 'ArrowRight', 39);
+        return true;
+      }
+
+      // 3. Синтетичні клавіші для P2
+      if (port === 1) {
+        const k = p2KeyMap[btnId];
+        if (k) {
+          const evType = isDown ? 'keydown' : 'keyup';
+          const canvas = document.querySelector('#game canvas');
+          const ev = new KeyboardEvent(evType, {
+            key: k.key, code: k.code, keyCode: k.keyCode, which: k.keyCode,
+            bubbles: true, cancelable: true, view: window
+          });
+          if (canvas) canvas.dispatchEvent(ev);
+          window.dispatchEvent(ev);
+        }
+        return true;
+      }
+
+      return false;
     }
 
     // ICE сервери
@@ -578,11 +620,23 @@
       window.EJS_mouse = false;
       window.EJS_defaultPlayers = 2;
 
+      // Хук старту гри: активуємо Port 1 для другого гравця
+      window.EJS_onGameStart = function() {
+        logScreen("Гра стартувала! Ініціалізуємо Port 2...", "info");
+        try {
+          const gm = window.EJS_emulator?.gameManager;
+          if (gm && gm.setDevice) {
+            gm.setDevice(1, 1);
+            logScreen("Port 2 активовано як Joypad!", "info");
+          }
+        } catch(e) {}
+      };
+
       logScreen("Завантажуємо loader.js...", "info");
       const loader = document.createElement('script');
       loader.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
       loader.async = true;
-      loader.onload = () => logScreen("loader.js успішно завантажено!");
+      loader.onload = () => logScreen("loader.js завантажено успішно!");
       loader.onerror = () => logScreen("Помилка завантаження CDN!", "err");
       document.head.appendChild(loader);
 
