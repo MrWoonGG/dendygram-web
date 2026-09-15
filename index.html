@@ -6,7 +6,7 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>DendyGram Dual Controller</title>
+  <title>DendyGram Ultra Low-Latency</title>
   
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -90,7 +90,10 @@
       height: 100% !important;
       object-fit: contain !important;
       background: #000;
+      image-rendering: -moz-crisp-edges !important;
+      image-rendering: -webkit-crisp-edges !important;
       image-rendering: pixelated !important;
+      image-rendering: crisp-edges !important;
     }
 
     #game canvas {
@@ -339,7 +342,7 @@
         <div id="waiting-overlay">
           <div class="spinner"></div>
           <div id="overlay-msg" style="font-weight: 700; font-size: 14px; margin-bottom: 6px;">ПІДКЛЮЧЕННЯ...</div>
-          <div id="overlay-sub" style="color: #71717a; font-size: 11px;">Очікування відеопотоку...</div>
+          <div id="overlay-sub" style="color: #71717a; font-size: 11px;">Очікування низьколатентного потоку...</div>
           <button id="play-trigger-btn">▶ УВІЙТИ В ГРУ</button>
         </div>
       </div>
@@ -464,7 +467,6 @@
       return window.__virtualPads;
     };
 
-    // Маппінг NES id -> Standard Gamepad id
     const nesToPad = { 0: 0, 8: 1, 2: 8, 3: 9, 4: 12, 5: 13, 6: 14, 7: 15 };
 
     const hostKeyMap = {
@@ -482,7 +484,6 @@
       const isDown = (val === 1);
       const emu = window.EJS_emulator;
 
-      // 1. Оновлюємо стан віртуального геймпада
       const padIdx = nesToPad[btnId];
       if (padIdx !== undefined && window.__virtualPads[port]) {
         window.__virtualPads[port].buttons[padIdx].pressed = isDown;
@@ -490,14 +491,12 @@
         window.__virtualPads[port].timestamp = performance.now();
       }
 
-      // 2. Викликаємо офіційний метод EmulatorJS: simulateInput
       try {
         if (emu?.gameManager?.simulateInput) {
           emu.gameManager.simulateInput(port, btnId, val);
         }
       } catch(e) {}
 
-      // 3. Дублювання для хоста через фізичні клавіші (Select/Start/Arrows)
       if (port === 0) {
         const k = hostKeyMap[btnId];
         if (k) {
@@ -528,7 +527,13 @@
       { urls: "turn:global.relay.metered.ca:443", username: "d7695a22150cfea32f5b287e", credential: "Jm8+83G3JIEbY+Dj" }
     ];
 
-    const peerConfig = { config: { iceServers: meteredIceServers } };
+    const peerConfig = {
+      config: {
+        iceServers: meteredIceServers,
+        sdpSemantics: 'unified-plan'
+      }
+    };
+
     let peer = null;
     let dataConn = null;
     const hostPeerId = `dendygram_cloud_${roomId}`;
@@ -544,7 +549,7 @@
         cloudVideo.muted = false;
         cloudVideo.play().then(() => {
           waitingOverlay.style.display = 'none';
-          setBrandStatus("DENDYGRAM • DUO LIVE", "#22c55e");
+          setBrandStatus("DENDYGRAM • LOW-LATENCY LIVE", "#22c55e");
           logScreen("Стрім запущено!", "info");
         }).catch(e => logScreen(`Play err: ${e.message}`, "err"));
       }
@@ -553,7 +558,7 @@
 
       peer = new Peer(peerConfig);
       peer.on('open', (id) => {
-        logScreen(`P2 зареєстровано: ${id.substring(0, 6)}`);
+        logScreen(`P2 підключено до сигналки: ${id.substring(0, 6)}`);
         dataConn = peer.connect(hostPeerId, { reliable: true });
 
         dataConn.on('open', () => {
@@ -563,21 +568,39 @@
       });
 
       peer.on('call', (call) => {
-        logScreen("Отримано відеопотік від хоста!", "info");
+        logScreen("Отримано відеопотік! Тюнінг джитер-буфера...", "info");
         call.answer();
+
+        // 1. АГРЕСИВНЕ ЗРІЗАННЯ ЗАТРИМКИ НА СТОРОНІ РЕСИВЕРА
+        if (call.peerConnection) {
+          call.peerConnection.ontrack = (event) => {
+            if (event.receiver) {
+              try {
+                if ('playoutDelayHint' in event.receiver) {
+                  event.receiver.playoutDelayHint = 0; // Нуль затримки буфера!
+                }
+                if ('jitterBufferTarget' in event.receiver) {
+                  event.receiver.jitterBufferTarget = 0;
+                }
+              } catch(e) {}
+            }
+            cloudVideo.srcObject = event.streams[0];
+          };
+        }
+
         call.on('stream', (remoteStream) => {
           cloudVideo.srcObject = remoteStream;
 
           cloudVideo.play().then(() => {
             waitingOverlay.style.display = 'none';
-            setBrandStatus("DENDYGRAM • DUO LIVE", "#22c55e");
-            logScreen("Автоплей активний!", "info");
+            setBrandStatus("DENDYGRAM • LOW-LATENCY LIVE", "#22c55e");
+            logScreen("Нульовий буфер активний!", "info");
           }).catch(() => {
-            logScreen("Браузер вимагає кліку для звуку", "warn");
+            logScreen("Браузер блокує автоплей: тисни кнопку!", "warn");
             const spinner = document.querySelector('.spinner');
             if (spinner) spinner.style.display = 'none';
-            overlayMsg.textContent = "СТРІМ ГОТОВИЙ!";
-            overlaySub.textContent = "Торкнись кнопки для активації гри";
+            overlayMsg.textContent = "ПОТІК ГОТОВИЙ!";
+            overlaySub.textContent = "Торкнись кнопки для активації ультра-стріму";
             playTriggerBtn.style.display = 'block';
           });
         });
@@ -646,10 +669,35 @@
         const canvas = document.querySelector('#game canvas');
         if (canvas && canvas.width > 50) {
           clearInterval(t);
-          logScreen(`Канвас виявлено (${canvas.width}x${canvas.height})! Запуск відео...`, "info");
+          logScreen(`Канвас (${canvas.width}x${canvas.height}). Формуємо 60 FPS потік...`, "info");
           try {
             const stream = canvas.captureStream(60);
-            peer.call(guestId, stream);
+            const vTrack = stream.getVideoTracks()[0];
+            if (vTrack && 'contentHint' in vTrack) {
+              vTrack.contentHint = 'detail';
+            }
+
+            const call = peer.call(guestId, stream);
+
+            // 2. ПРІОРИТИЗАЦІЯ ПЕРЕДАЧІ ТА МАКСИМАЛЬНА ЧАСТОТА
+            if (call && call.peerConnection) {
+              call.peerConnection.addEventListener('negotiationneeded', async () => {
+                try {
+                  const senders = call.peerConnection.getSenders();
+                  const vSender = senders.find(s => s.track && s.track.kind === 'video');
+                  if (vSender) {
+                    const params = vSender.getParameters();
+                    if (!params.encodings) params.encodings = [{}];
+                    params.encodings[0].maxBitrate = 2500000;
+                    params.encodings[0].maxFramerate = 60;
+                    params.encodings[0].priority = 'high';
+                    params.encodings[0].networkPriority = 'high';
+                    await vSender.setParameters(params);
+                  }
+                } catch(e) {}
+              });
+            }
+
             logScreen("Медіапотік надіслано гостю!", "info");
           } catch(e) {
             logScreen(`Помилка captureStream: ${e.message}`, "err");
