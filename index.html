@@ -6,7 +6,7 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>DendyGram Ultra Low-Latency</title>
+  <title>DendyGram WebCodecs Ultra</title>
   
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -84,16 +84,13 @@
       display: block;
     }
 
-    #cloud-video {
+    #guest-canvas {
       display: none;
       width: 100% !important;
       height: 100% !important;
       object-fit: contain !important;
       background: #000;
-      image-rendering: -moz-crisp-edges !important;
-      image-rendering: -webkit-crisp-edges !important;
       image-rendering: pixelated !important;
-      image-rendering: crisp-edges !important;
     }
 
     #game canvas {
@@ -141,25 +138,6 @@
     }
 
     @keyframes spin { to { transform: rotate(360deg); } }
-
-    #play-trigger-btn {
-      display: none;
-      margin-top: 14px;
-      background: #22c55e;
-      color: #052e16;
-      border: none;
-      font-weight: 800;
-      font-size: 13px;
-      padding: 10px 20px;
-      border-radius: 8px;
-      box-shadow: 0 4px 14px rgba(34, 197, 94, 0.4);
-      cursor: pointer;
-    }
-
-    #play-trigger-btn:active {
-      transform: scale(0.96);
-      background: #16a34a;
-    }
 
     .logger-wrapper {
       position: relative;
@@ -338,15 +316,14 @@
     <div class="screen-bezel">
       <div id="game-container">
         <div id="game"></div>
-        <video id="cloud-video" autoplay playsinline></video>
+        <canvas id="guest-canvas" width="256" height="240"></canvas>
         <div id="waiting-overlay">
           <div class="spinner"></div>
           <div id="overlay-msg" style="font-weight: 700; font-size: 14px; margin-bottom: 6px;">ПІДКЛЮЧЕННЯ...</div>
-          <div id="overlay-sub" style="color: #71717a; font-size: 11px;">Очікування низьколатентного потоку...</div>
-          <button id="play-trigger-btn">▶ УВІЙТИ В ГРУ</button>
+          <div id="overlay-sub" style="color: #71717a; font-size: 11px;">Очікування WebCodecs потоку...</div>
         </div>
       </div>
-      <div class="brand">DENDYGRAM</div>
+      <div class="brand">DENDYGRAM • WEBCODECS</div>
     </div>
 
     <div class="logger-wrapper">
@@ -449,15 +426,13 @@
     }
 
     const gameDiv = document.getElementById('game');
-    const cloudVideo = document.getElementById('cloud-video');
+    const guestCanvas = document.getElementById('guest-canvas');
+    const guestCtx = guestCanvas ? guestCanvas.getContext('2d', { alpha: false, desynchronized: true }) : null;
     const waitingOverlay = document.getElementById('waiting-overlay');
-    const playTriggerBtn = document.getElementById('play-trigger-btn');
-    const overlayMsg = document.getElementById('overlay-msg');
-    const overlaySub = document.getElementById('overlay-sub');
 
-    // ====================================================
-    // ДВА ВІРТУАЛЬНІ GAMEPAD ДЛЯ RETROARCH (P1 + P2)
-    // ====================================================
+    // ==========================================
+    // ВІРТУАЛЬНІ GAMEPAD ДЛЯ RETROARCH
+    // ==========================================
     window.__virtualPads = [
       { id: "P1 Controller", index: 0, connected: true, timestamp: performance.now(), mapping: "standard", axes: [0, 0], buttons: Array.from({ length: 16 }, () => ({ pressed: false, value: 0 })) },
       { id: "P2 Controller", index: 1, connected: true, timestamp: performance.now(), mapping: "standard", axes: [0, 0], buttons: Array.from({ length: 16 }, () => ({ pressed: false, value: 0 })) }
@@ -468,7 +443,6 @@
     };
 
     const nesToPad = { 0: 0, 8: 1, 2: 8, 3: 9, 4: 12, 5: 13, 6: 14, 7: 15 };
-
     const hostKeyMap = {
       0: { key: 'z', code: 'KeyZ', keyCode: 90 },
       8: { key: 'x', code: 'KeyX', keyCode: 88 },
@@ -520,96 +494,140 @@
       }
     }
 
-    // ICE сервери
+    // ==========================================
+    // WEBCODECS ПАЙПЛАЙН (LOW LATENCY)
+    // ==========================================
+    const hasWebCodecs = typeof window.VideoEncoder === 'function' && typeof window.VideoDecoder === 'function';
+    if (!hasWebCodecs) {
+      logScreen("Увага: WebCodecs не підтримується цим WebView!", "warn");
+    } else {
+      logScreen("WebCodecs готовий до роботи!", "info");
+    }
+
+    let videoDecoder = null;
+    let videoEncoder = null;
+    let encodeLoopActive = false;
+    let frameCount = 0;
+
+    function setupGuestDecoder() {
+      if (!hasWebCodecs) return;
+      try {
+        videoDecoder = new VideoDecoder({
+          output: (frame) => {
+            if (guestCanvas && guestCtx) {
+              if (guestCanvas.width !== frame.displayWidth || guestCanvas.height !== frame.displayHeight) {
+                guestCanvas.width = frame.displayWidth;
+                guestCanvas.height = frame.displayHeight;
+              }
+              guestCtx.drawImage(frame, 0, 0, guestCanvas.width, guestCanvas.height);
+            }
+            frame.close();
+            if (waitingOverlay.style.display !== 'none') {
+              waitingOverlay.style.display = 'none';
+              setBrandStatus("DENDYGRAM • 0MS PIPELINE", "#22c55e");
+            }
+          },
+          error: (e) => logScreen(`Decoder err: ${e.message}`, "err")
+        });
+
+        videoDecoder.configure({
+          codec: 'avc1.42001f', // H.264 Baseline Profile 3.1
+          optimizeForLatency: true
+        });
+        logScreen("Декодер P2 налаштовано!", "info");
+      } catch(e) {
+        logScreen(`Помилка ініціалізації декодера: ${e.message}`, "err");
+      }
+    }
+
+    function setupHostEncoder(sendFn) {
+      if (!hasWebCodecs) return;
+      try {
+        videoEncoder = new VideoEncoder({
+          output: (chunk, metadata) => {
+            const buf = new Uint8Array(chunk.byteLength);
+            chunk.copyTo(buf);
+            sendFn({
+              t: 'V',
+              type: chunk.type,
+              ts: chunk.timestamp,
+              b: buf.buffer
+            }, [buf.buffer]);
+          },
+          error: (e) => logScreen(`Encoder err: ${e.message}`, "err")
+        });
+
+        videoEncoder.configure({
+          codec: 'avc1.42001f',
+          width: 256,
+          height: 240,
+          bitrate: 1500000,
+          framerate: 60,
+          latencyMode: 'realtime',
+          avc: { format: 'annexb' }
+        });
+        logScreen("Енкодер хоста налаштовано!", "info");
+      } catch(e) {
+        logScreen(`Помилка ініціалізації енкодера: ${e.message}`, "err");
+      }
+    }
+
+    // ==========================================
+    // PEERJS DATA CHANNELS
+    // ==========================================
     const meteredIceServers = [
       { urls: "stun:stun.relay.metered.ca:80" },
       { urls: "turn:global.relay.metered.ca:80", username: "d7695a22150cfea32f5b287e", credential: "Jm8+83G3JIEbY+Dj" },
       { urls: "turn:global.relay.metered.ca:443", username: "d7695a22150cfea32f5b287e", credential: "Jm8+83G3JIEbY+Dj" }
     ];
 
-    const peerConfig = {
-      config: {
-        iceServers: meteredIceServers,
-        sdpSemantics: 'unified-plan'
-      }
-    };
-
+    const peerConfig = { config: { iceServers: meteredIceServers } };
     let peer = null;
     let dataConn = null;
-    const hostPeerId = `dendygram_cloud_${roomId}`;
+    const hostPeerId = `dendygram_wc_${roomId}`;
 
     if (roomId && isGuest) {
-      // === P2 (ГІСТЬ) ===
+      // === P2 GUEST ===
       setBrandStatus("DENDYGRAM • P2 GUEST", "#34d399");
       gameDiv.style.display = 'none';
-      cloudVideo.style.display = 'block';
+      guestCanvas.style.display = 'block';
       waitingOverlay.style.display = 'flex';
 
-      function unlockVideo() {
-        cloudVideo.muted = false;
-        cloudVideo.play().then(() => {
-          waitingOverlay.style.display = 'none';
-          setBrandStatus("DENDYGRAM • LOW-LATENCY LIVE", "#22c55e");
-          logScreen("Стрім запущено!", "info");
-        }).catch(e => logScreen(`Play err: ${e.message}`, "err"));
-      }
-
-      playTriggerBtn.addEventListener('click', unlockVideo);
+      setupGuestDecoder();
 
       peer = new Peer(peerConfig);
       peer.on('open', (id) => {
-        logScreen(`P2 підключено до сигналки: ${id.substring(0, 6)}`);
-        dataConn = peer.connect(hostPeerId, { reliable: true });
+        logScreen(`P2 зареєстровано: ${id.substring(0, 6)}`);
+        // Неблокуючий UDP-подібний канал
+        dataConn = peer.connect(hostPeerId, {
+          reliable: false,
+          serialization: 'binary'
+        });
 
         dataConn.on('open', () => {
-          logScreen("Канал кнопок з'єднано з хостом!", "info");
+          logScreen("Прямий DataChannel до хоста відкрито!", "info");
         });
+
+        dataConn.on('data', (d) => {
+          if (d.t === 'V' && videoDecoder && videoDecoder.state === 'configured') {
+            try {
+              const chunk = new EncodedVideoChunk({
+                type: d.type,
+                timestamp: d.ts,
+                data: d.b
+              });
+              videoDecoder.decode(chunk);
+            } catch(e) {}
+          }
+        });
+
         dataConn.on('error', (e) => logScreen(`DataConn err: ${e}`, 'err'));
-      });
-
-      peer.on('call', (call) => {
-        logScreen("Отримано відеопотік! Тюнінг джитер-буфера...", "info");
-        call.answer();
-
-        // 1. АГРЕСИВНЕ ЗРІЗАННЯ ЗАТРИМКИ НА СТОРОНІ РЕСИВЕРА
-        if (call.peerConnection) {
-          call.peerConnection.ontrack = (event) => {
-            if (event.receiver) {
-              try {
-                if ('playoutDelayHint' in event.receiver) {
-                  event.receiver.playoutDelayHint = 0; // Нуль затримки буфера!
-                }
-                if ('jitterBufferTarget' in event.receiver) {
-                  event.receiver.jitterBufferTarget = 0;
-                }
-              } catch(e) {}
-            }
-            cloudVideo.srcObject = event.streams[0];
-          };
-        }
-
-        call.on('stream', (remoteStream) => {
-          cloudVideo.srcObject = remoteStream;
-
-          cloudVideo.play().then(() => {
-            waitingOverlay.style.display = 'none';
-            setBrandStatus("DENDYGRAM • LOW-LATENCY LIVE", "#22c55e");
-            logScreen("Нульовий буфер активний!", "info");
-          }).catch(() => {
-            logScreen("Браузер блокує автоплей: тисни кнопку!", "warn");
-            const spinner = document.querySelector('.spinner');
-            if (spinner) spinner.style.display = 'none';
-            overlayMsg.textContent = "ПОТІК ГОТОВИЙ!";
-            overlaySub.textContent = "Торкнись кнопки для активації ультра-стріму";
-            playTriggerBtn.style.display = 'block';
-          });
-        });
       });
 
       peer.on('error', (err) => logScreen(`Peer P2 err: ${err.type}`, "err"));
 
     } else {
-      // === P1 (ХОСТ) ===
+      // === P1 HOST ===
       setBrandStatus(roomId ? "DENDYGRAM • HOSTING" : "DENDYGRAM • SOLO", "#38bdf8");
 
       let cleanRom = targetRom;
@@ -645,8 +663,8 @@
 
         peer.on('connection', (c) => {
           dataConn = c;
-          setBrandStatus("DENDYGRAM • P2 ONLINE!", "#22c55e");
-          logScreen("Гравець 2 підключився!", "info");
+          setBrandStatus("DENDYGRAM • P2 CONNECTED!", "#22c55e");
+          logScreen("Гравець 2 на каналі!", "info");
 
           c.on('data', (d) => {
             if (d.t === 'INP') {
@@ -655,61 +673,59 @@
             }
           });
 
-          initStreamToGuest(c.peer);
+          setupHostEncoder((payload, transferables) => {
+            if (c.open) {
+              c.send(payload);
+            }
+          });
+
+          startCaptureLoop();
         });
 
         peer.on('error', (err) => logScreen(`Peer хоста: ${err.type}`, "err"));
       }
     }
 
-    function initStreamToGuest(guestId) {
+    // Захоплення кадрів з канвасу безпосередньо у VideoFrame
+    function startCaptureLoop() {
+      if (encodeLoopActive) return;
+      encodeLoopActive = true;
+
       let tries = 0;
-      const t = setInterval(() => {
+      const chk = setInterval(() => {
         tries++;
         const canvas = document.querySelector('#game canvas');
-        if (canvas && canvas.width > 50) {
-          clearInterval(t);
-          logScreen(`Канвас (${canvas.width}x${canvas.height}). Формуємо 60 FPS потік...`, "info");
-          try {
-            const stream = canvas.captureStream(60);
-            const vTrack = stream.getVideoTracks()[0];
-            if (vTrack && 'contentHint' in vTrack) {
-              vTrack.contentHint = 'detail';
+        if (canvas && canvas.width > 50 && videoEncoder) {
+          clearInterval(chk);
+          logScreen(`Канвас готовий (${canvas.width}x${canvas.height}). Запуск WebCodecs стріму!`, "info");
+
+          function renderFrame(now) {
+            if (!encodeLoopActive) return;
+
+            if (dataConn && dataConn.open && videoEncoder.state === 'configured' && canvas.width > 0) {
+              try {
+                frameCount++;
+                const isKey = (frameCount % 60 === 1); // Keyframe раз на секунду
+                const frame = new VideoFrame(canvas, { timestamp: Math.floor(now * 1000) });
+                videoEncoder.encode(frame, { keyFrame: isKey });
+                frame.close();
+              } catch(e) {}
             }
-
-            const call = peer.call(guestId, stream);
-
-            // 2. ПРІОРИТИЗАЦІЯ ПЕРЕДАЧІ ТА МАКСИМАЛЬНА ЧАСТОТА
-            if (call && call.peerConnection) {
-              call.peerConnection.addEventListener('negotiationneeded', async () => {
-                try {
-                  const senders = call.peerConnection.getSenders();
-                  const vSender = senders.find(s => s.track && s.track.kind === 'video');
-                  if (vSender) {
-                    const params = vSender.getParameters();
-                    if (!params.encodings) params.encodings = [{}];
-                    params.encodings[0].maxBitrate = 2500000;
-                    params.encodings[0].maxFramerate = 60;
-                    params.encodings[0].priority = 'high';
-                    params.encodings[0].networkPriority = 'high';
-                    await vSender.setParameters(params);
-                  }
-                } catch(e) {}
-              });
-            }
-
-            logScreen("Медіапотік надіслано гостю!", "info");
-          } catch(e) {
-            logScreen(`Помилка captureStream: ${e.message}`, "err");
+            requestAnimationFrame(renderFrame);
           }
+          requestAnimationFrame(renderFrame);
         }
+
         if (tries > 50) {
-          clearInterval(t);
-          logScreen("Таймаут очікування канвасу!", "warn");
+          clearInterval(chk);
+          logScreen("Таймаут виявлення канвасу", "warn");
         }
       }, 300);
     }
 
+    // ==========================================
+    // КЕРУВАННЯ
+    // ==========================================
     function handleButtonAction(btnId, isDown) {
       const val = isDown ? 1 : 0;
       if (isGuest) {
@@ -717,7 +733,7 @@
           dataConn.send({ t: 'INP', b: btnId, v: val });
           logScreen(`P2 тап: btn=${btnId} val=${val}`);
         } else {
-          logScreen("Немає з'єднання", "warn");
+          logScreen("Канал не готовий", "warn");
         }
       } else {
         sendEjsInput(0, btnId, val);
