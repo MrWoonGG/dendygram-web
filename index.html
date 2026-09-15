@@ -6,9 +6,11 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>DendyGram Turbo State Sync</title>
+  <title>DendyGram Cloud Stream</title>
+  
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  
   <style>
     * {
       box-sizing: border-box;
@@ -76,19 +78,24 @@
       position: relative;
     }
 
-    #game {
+    /* Нативне полотно емулятора та відеопотік хмарного стріму */
+    #game, #cloud-video {
       width: 100% !important;
       height: 100% !important;
       display: block !important;
+      object-fit: contain !important;
+      background: #000;
     }
 
-    #game canvas {
+    #cloud-video, #game canvas {
       display: block !important;
       width: 100% !important;
       height: 100% !important;
       object-fit: contain !important;
+      image-rendering: -moz-crisp-edges !important;
+      image-rendering: -webkit-crisp-edges !important;
       image-rendering: pixelated !important;
-      background: #000;
+      image-rendering: crisp-edges !important;
     }
 
     #game .ejs_virtual_gamepad,
@@ -99,6 +106,35 @@
       opacity: 0 !important;
       pointer-events: none !important;
     }
+
+    #waiting-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: #09090b;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      color: #fafafa;
+      text-align: center;
+      padding: 20px;
+    }
+
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid rgba(255,255,255,0.1);
+      border-top-color: #38bdf8;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 12px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
 
     .logger-wrapper {
       position: relative;
@@ -277,8 +313,13 @@
     <div class="screen-bezel">
       <div id="game-container">
         <div id="game"></div>
+        <div id="waiting-overlay">
+          <div class="spinner"></div>
+          <div style="font-weight: 700; font-size: 14px; margin-bottom: 6px;">ПІДКЛЮЧЕННЯ ДО ХОСТА...</div>
+          <div style="color: #71717a; font-size: 11px;">Ініціалізація хмарного потоку...</div>
+        </div>
       </div>
-      <div class="brand">DENDYGRAM • TURBO SYNC</div>
+      <div class="brand">DENDYGRAM • CLOUD</div>
     </div>
 
     <div class="logger-wrapper">
@@ -380,190 +421,303 @@
       if (color) brandElem.style.color = color;
     }
 
-    setBrandStatus(`DENDYGRAM • ${isGuest ? 'P2 (GUEST)' : 'P1 (HOST)'}`, isGuest ? '#34d399' : '#38bdf8');
-    logScreen(`Роль: ${isGuest ? 'P2' : 'P1'} | Кімната: ${roomId || 'Соло'}`);
+    const gameContainer = document.getElementById('game-container');
+    const waitingOverlay = document.getElementById('waiting-overlay');
 
-    // --- ДРОБОВИК ДЛЯ КЕРУВАННЯ P1 ТА P2 ---
+    // ==========================================
+    // ВІРТУАЛЬНИЙ GAMEPAD API ДЛЯ RETROARCH P2
+    // ==========================================
+    window.__p2Gamepad = {
+      id: "DendyGram Virtual Controller",
+      index: 1,
+      connected: true,
+      timestamp: performance.now(),
+      mapping: "standard",
+      axes: [0, 0, 0, 0],
+      buttons: Array.from({ length: 16 }, () => ({ pressed: false, value: 0 }))
+    };
+
+    const origGetGamepads = navigator.getGamepads ? navigator.getGamepads.bind(navigator) : null;
+    navigator.getGamepads = function() {
+      const pads = origGetGamepads ? Array.from(origGetGamepads()) : [null, null];
+      pads[1] = window.__p2Gamepad;
+      return pads;
+    };
+
+    // Стандартні індекси кнопок W3C Gamepad:
+    const nesToGamepadIndex = {
+      0: 0,   // B
+      8: 1,   // A
+      2: 8,   // SELECT
+      3: 9,   // START
+      4: 12,  // UP
+      5: 13,  // DOWN
+      6: 14,  // LEFT
+      7: 15   // RIGHT
+    };
+
     function sendEjsInput(port, btnId, val) {
       const emu = window.EJS_emulator;
-      let ok = false;
+      const isDown = val === 1;
 
-      // 1. Прямий інпут у порт
-      try {
-        if (emu?.controls?.simulateButton) {
-          emu.controls.simulateButton(port, btnId, val);
-          ok = true;
-        }
-        if (emu?.gameManager?.setInputValue) {
-          emu.gameManager.setInputValue(port, btnId, val);
-          ok = true;
-        }
-      } catch (e) {}
-
-      // 2. Для P1 стріляємо подіями клавіатури
-      if (port === 0) {
-        const evType = val ? 'keydown' : 'keyup';
-        const canvas = document.querySelector('#game canvas');
-        function fireKey(k, c, codeNum) {
-          const ev = new KeyboardEvent(evType, {
-            key: k, code: c, keyCode: codeNum, which: codeNum,
-            bubbles: true, cancelable: true, view: window
-          });
-          if (canvas) canvas.dispatchEvent(ev);
-          window.dispatchEvent(ev);
+      if (port === 1) {
+        // Оновлюємо віртуальний Gamepad 2
+        const padIdx = nesToGamepadIndex[btnId];
+        if (padIdx !== undefined && window.__p2Gamepad) {
+          window.__p2Gamepad.buttons[padIdx].pressed = isDown;
+          window.__p2Gamepad.buttons[padIdx].value = isDown ? 1.0 : 0.0;
+          window.__p2Gamepad.timestamp = performance.now();
         }
 
-        if (btnId === 2) {
-          fireKey('Shift', 'ShiftLeft', 16);
-          fireKey('v', 'KeyV', 86);
-        } else if (btnId === 3) fireKey('Enter', 'Enter', 13);
-        else if (btnId === 0) fireKey('z', 'KeyZ', 90);
-        else if (btnId === 8) fireKey('x', 'KeyX', 88);
-        else if (btnId === 4) fireKey('ArrowUp', 'ArrowUp', 38);
-        else if (btnId === 5) fireKey('ArrowDown', 'ArrowDown', 40);
-        else if (btnId === 6) fireKey('ArrowLeft', 'ArrowLeft', 37);
-        else if (btnId === 7) fireKey('ArrowRight', 'ArrowRight', 39);
+        // Паралельно викликаємо внутрішні методи ядра
+        try {
+          if (emu?.controls?.simulateButton) emu.controls.simulateButton(1, btnId, val);
+          if (emu?.gameManager?.setInputValue) emu.gameManager.setInputValue(1, btnId, val);
+        } catch(e) {}
+        return true;
       }
 
-      return ok;
+      // Для P1 — емулюємо системні клавіші
+      const evType = isDown ? 'keydown' : 'keyup';
+      const canvas = document.querySelector('#game canvas');
+      function fireKey(k, c, codeNum) {
+        const ev = new KeyboardEvent(evType, {
+          key: k, code: c, keyCode: codeNum, which: codeNum,
+          bubbles: true, cancelable: true, view: window
+        });
+        if (canvas) canvas.dispatchEvent(ev);
+        window.dispatchEvent(ev);
+      }
+
+      if (btnId === 2) {
+        fireKey('Shift', 'ShiftLeft', 16);
+        fireKey('v', 'KeyV', 86);
+      } else if (btnId === 3) fireKey('Enter', 'Enter', 13);
+      else if (btnId === 0) fireKey('z', 'KeyZ', 90);
+      else if (btnId === 8) fireKey('x', 'KeyX', 88);
+      else if (btnId === 4) fireKey('ArrowUp', 'ArrowUp', 38);
+      else if (btnId === 5) fireKey('ArrowDown', 'ArrowDown', 40);
+      else if (btnId === 6) fireKey('ArrowLeft', 'ArrowLeft', 37);
+      else if (btnId === 7) fireKey('ArrowRight', 'ArrowRight', 39);
+
+      try {
+        if (emu?.controls?.simulateButton) emu.controls.simulateButton(0, btnId, val);
+      } catch(e) {}
+      return true;
     }
 
-    // --- СТАРТ ЕМУЛЯТОРА ---
-    let cleanRom = targetRom;
-    try {
-      if (cleanRom.startsWith('http')) {
-        try { cleanRom = decodeURIComponent(cleanRom); } catch (e) {}
-      } else {
-        cleanRom = decodeBase64Url(cleanRom);
-      }
-    } catch (e) {}
+    // ==========================================
+    // ПЕРЕХОПЛЕННЯ АУДІО ДЛЯ СТРІМУ
+    // ==========================================
+    let hostAudioTrack = null;
+    const OrigAudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (OrigAudioCtx) {
+      window.AudioContext = window.webkitAudioContext = function() {
+        const ctx = new OrigAudioCtx();
+        try {
+          const dest = ctx.createMediaStreamDestination();
+          ctx.destination.connect(dest);
+          if (dest.stream.getAudioTracks().length > 0) {
+            hostAudioTrack = dest.stream.getAudioTracks()[0];
+          }
+        } catch(e) {}
+        return ctx;
+      };
+    }
 
-    window.EJS_player = '#game';
-    window.EJS_core = 'nes';
-    window.EJS_gameUrl = cleanRom;
-    window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
-    window.EJS_startOnLoaded = true;
-    window.EJS_alignStartButton = false;
-    window.EJS_disableToolbar = true;
-    window.EJS_VirtualGamepadSettings = [0, 0];
-    window.EJS_mouse = false;
-    window.EJS_defaultPlayers = 2;
-
-    const loader = document.createElement('script');
-    loader.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
-    loader.async = true;
-    loader.onload = () => logScreen("loader.js завантажено успішно!");
-    loader.onerror = () => logScreen("CDN loader.js недоступний!", "err");
-    document.head.appendChild(loader);
-
-    // --- P2P ПІДКЛЮЧЕННЯ (RELIABLE: TRUE ДЛЯ 100% ДОСТАВКИ) ---
+    // ==========================================
+    // P2P КОНФІГУРАЦІЯ
+    // ==========================================
     const meteredIceServers = [
       { urls: "stun:stun.relay.metered.ca:80" },
       { urls: "turn:global.relay.metered.ca:80", username: "d7695a22150cfea32f5b287e", credential: "Jm8+83G3JIEbY+Dj" },
       { urls: "turn:global.relay.metered.ca:443", username: "d7695a22150cfea32f5b287e", credential: "Jm8+83G3JIEbY+Dj" }
     ];
 
+    const peerConfig = {
+      config: {
+        iceServers: meteredIceServers,
+        sdpSemantics: 'unified-plan'
+      }
+    };
+
     let peer = null;
     let dataConn = null;
-    let streamInterval = null;
-    const hostPeerId = `dendygram_ram_${roomId}`;
+    const hostPeerId = `dendygram_cloud_${roomId}`;
 
-    if (roomId) {
-      const peerConfig = { config: { iceServers: meteredIceServers } };
+    if (roomId && isGuest) {
+      // ==========================================
+      // КЛІЄНТ (P2) - ХМАРНИЙ РЕНДЕР БЕЗ ЕМУЛЯТОРА
+      // ==========================================
+      setBrandStatus("DENDYGRAM • CLOUD GUEST", "#34d399");
+      waitingOverlay.style.display = 'flex';
 
-      if (!isGuest) {
-        // === ХОСТ (P1) ===
+      const localGame = document.getElementById('game');
+      if (localGame) localGame.remove();
+
+      const video = document.createElement('video');
+      video.id = 'cloud-video';
+      video.autoplay = true;
+      video.playsInline = true;
+      video.muted = false; // Звук грає нативно
+      gameContainer.appendChild(video);
+
+      video.addEventListener('playing', () => {
+        waitingOverlay.style.display = 'none';
+        setBrandStatus("DENDYGRAM • 60 FPS LIVE", "#22c55e");
+        logScreen("Хмарний стрім активний!", "info");
+      });
+
+      peer = new Peer(peerConfig);
+      peer.on('open', (id) => {
+        logScreen(`P2 зареєстровано: ${id.substring(0, 8)}...`);
+        dataConn = peer.connect(hostPeerId, { reliable: true });
+
+        dataConn.on('open', () => {
+          logScreen("Канал керування підключено!", "info");
+        });
+        dataConn.on('error', (e) => logScreen(`DataConn err: ${e}`, 'err'));
+      });
+
+      peer.on('call', (call) => {
+        logScreen("Отримано медіапотік гри від хоста!", "info");
+        call.answer();
+        call.on('stream', (remoteStream) => {
+          video.srcObject = remoteStream;
+          video.play().catch(e => {
+            logScreen("Autoplay блоковано. Торкнись екрана!", "warn");
+            document.body.addEventListener('touchstart', () => video.play(), { once: true });
+          });
+        });
+      });
+
+      peer.on('error', (err) => logScreen(`Peer err: ${err.type}`, "err"));
+
+    } else {
+      // ==========================================
+      // ХОСТ (P1) - ЕМУЛЯТОР + ХМАРНИЙ СЕРВЕР
+      // ==========================================
+      setBrandStatus(roomId ? "DENDYGRAM • HOSTING" : "DENDYGRAM • SOLO", "#38bdf8");
+
+      let cleanRom = targetRom;
+      try {
+        if (!cleanRom.startsWith('http')) cleanRom = decodeBase64Url(cleanRom);
+        else cleanRom = decodeURIComponent(cleanRom);
+      } catch (e) {}
+
+      window.EJS_player = '#game';
+      window.EJS_core = 'nes';
+      window.EJS_gameUrl = cleanRom;
+      window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
+      window.EJS_startOnLoaded = true;
+      window.EJS_alignStartButton = false;
+      window.EJS_disableToolbar = true;
+      window.EJS_VirtualGamepadSettings = [0, 0];
+      window.EJS_mouse = false;
+      window.EJS_defaultPlayers = 2;
+
+      logScreen("Завантажуємо емулятор...", "info");
+      const loader = document.createElement('script');
+      loader.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
+      loader.async = true;
+      document.head.appendChild(loader);
+
+      if (roomId) {
         peer = new Peer(hostPeerId, peerConfig);
 
-        peer.on('open', () => logScreen("Хост очікує гостя..."));
+        peer.on('open', () => {
+          logScreen("Хост очікує підключення другого гравця...");
+        });
 
         peer.on('connection', (c) => {
           dataConn = c;
-          setBrandStatus("DENDYGRAM • DUO (50MS SYNC)", "#22c55e");
-          logScreen("P2 зайшов! Канал з'єднано", "info");
-
-          c.on('open', () => {
-            logScreen("DataChannel повністю готовий!", "info");
-          });
+          setBrandStatus("DENDYGRAM • P2 ONLINE!", "#22c55e");
+          logScreen("Гравець 2 підключився! Запуск стріму...", "info");
 
           c.on('data', (d) => {
             if (d.t === 'INP') {
-              const res = sendEjsInput(1, d.b, d.v);
-              logScreen(`P2 TAP -> btn=${d.b} val=${d.v} (${res ? 'OK' : 'FAIL'})`);
+              sendEjsInput(1, d.b, d.v);
+              logScreen(`P2 TAP -> btn=${d.b} val=${d.v}`);
             }
           });
 
-          // Стрім повного стейту кожні 0.05 сек (50 мс)
-          if (streamInterval) clearInterval(streamInterval);
-          streamInterval = setInterval(broadcastFullState, 50);
+          startCloudStream(c.peer);
         });
 
         peer.on('error', (err) => logScreen(`Peer хоста: ${err.type}`, "err"));
-
-      } else {
-        // === ГІСТЬ (P2) ===
-        peer = new Peer(peerConfig);
-
-        peer.on('open', () => {
-          logScreen("P2 зареєстрований, конектимось...", "info");
-          // reliable: true щоб пакети інпутів не губилися в дорозі
-          dataConn = peer.connect(hostPeerId, { reliable: true });
-
-          dataConn.on('open', () => {
-            setBrandStatus("DENDYGRAM • DUO (50MS SYNC)", "#22c55e");
-            logScreen("Канал кнопок відкрито!", "info");
-          });
-
-          dataConn.on('data', (d) => {
-            if (d.t === 'S' && d.b) {
-              applyIncomingState(d.b);
-            }
-          });
-
-          dataConn.on('error', (err) => logScreen(`DataConn помилка: ${err}`, "err"));
-        });
-
-        peer.on('error', (err) => logScreen(`Peer P2: ${err.type}`, "err"));
       }
     }
 
-    // Стрім повного стейту (кожні 50 мс)
-    function broadcastFullState() {
-      if (!dataConn || !dataConn.open) return;
-      try {
-        const emu = window.EJS_emulator;
-        if (emu?.gameManager?.getState) {
-          const state = emu.gameManager.getState();
-          if (state && state.length > 0) {
-            dataConn.send({ t: 'S', b: state });
+    // Запуск захоплення полотна та аудіо з бітрейт-тюнінгом
+    function startCloudStream(guestId) {
+      let attempts = 0;
+      const streamTimer = setInterval(() => {
+        attempts++;
+        const canvas = document.querySelector('#game canvas');
+        if (canvas && canvas.width > 100 && window.EJS_emulator) {
+          clearInterval(streamTimer);
+          logScreen(`Канвас готовий (${canvas.width}x${canvas.height}). Формуємо потік...`, "info");
+
+          try {
+            // Захоплення 60 FPS прямо з канвасу NES
+            const videoStream = canvas.captureStream(60);
+            const vTrack = videoStream.getVideoTracks()[0];
+            if (vTrack && 'contentHint' in vTrack) {
+              vTrack.contentHint = 'detail'; // Зберігає піксельну чіткість без згладжування
+            }
+
+            const combinedStream = new MediaStream();
+            if (vTrack) combinedStream.addTrack(vTrack);
+            if (hostAudioTrack) combinedStream.addTrack(hostAudioTrack);
+
+            const call = peer.call(guestId, combinedStream);
+
+            if (call && call.peerConnection) {
+              call.peerConnection.addEventListener('negotiationneeded', async () => {
+                try {
+                  const senders = call.peerConnection.getSenders();
+                  const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+                  if (videoSender) {
+                    const params = videoSender.getParameters();
+                    if (!params.encodings) params.encodings = [{}];
+                    // 2.0 Мбіт/с з головою вистачає для 256x240 на 60 FPS
+                    params.encodings[0].maxBitrate = 2000000;
+                    params.encodings[0].maxFramerate = 60;
+                    await videoSender.setParameters(params);
+                  }
+                } catch(e) {}
+              });
+            }
+
+            logScreen("Хмарний стрім надіслано гостю!", "info");
+          } catch(err) {
+            logScreen(`Помилка стріму: ${err.message}`, "err");
           }
         }
-      } catch (e) {}
-    }
 
-    function applyIncomingState(buffer) {
-      try {
-        const emu = window.EJS_emulator;
-        if (emu?.gameManager?.loadState) {
-          emu.gameManager.loadState(new Uint8Array(buffer));
+        if (attempts > 50) {
+          clearInterval(streamTimer);
+          logScreen("Таймаут захоплення канвасу", "warn");
         }
-      } catch (e) {}
+      }, 300);
     }
 
-    // Обробка кнопок
+    // ==========================================
+    // ОБРОБКА ГЕЙМПАДУ
+    // ==========================================
     function handleButtonAction(btnId, isDown) {
       const val = isDown ? 1 : 0;
 
       if (isGuest) {
-        // P2 шле інпут хосту
+        // P2 надсилає інпут через надійний DataChannel
         if (dataConn && dataConn.open) {
           dataConn.send({ t: 'INP', b: btnId, v: val });
-          logScreen(`P2 надіслав: btn=${btnId} val=${val}`);
+          logScreen(`P2 тап: btn=${btnId} val=${val}`);
         } else {
-          logScreen("DataChannel не готовий!", "warn");
+          logScreen("Зв'язок не готовий", "warn");
         }
       } else {
-        // Хост керує P1 локально
+        // P1 керує локально
         sendEjsInput(0, btnId, val);
         logScreen(`P1 тап: btn=${btnId} val=${val}`);
       }
