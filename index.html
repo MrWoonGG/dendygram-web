@@ -6,7 +6,7 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>DendyGram Ultra Tuned 10/10</title>
+  <title>DendyGram Ultra Tuned Realtime</title>
   
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -87,7 +87,6 @@
 
     #cloud-video {
       display: none;
-      /* Додано соковитості, яскравості та піксельної чіткості */
       filter: brightness(1.15) contrast(1.12) saturate(1.15);
       image-rendering: -moz-crisp-edges !important;
       image-rendering: -webkit-crisp-edges !important;
@@ -455,10 +454,19 @@
     const overlayMsg = document.getElementById('overlay-msg');
     const overlaySub = document.getElementById('overlay-sub');
 
-    if (cloudVideo) {
-      cloudVideo.addEventListener('playing', () => {
+    function dismissOverlay() {
+      if (waitingOverlay.style.display !== 'none') {
         waitingOverlay.style.display = 'none';
-        setBrandStatus("DENDYGRAM • LOW-LATENCY 10/10", "#22c55e");
+        setBrandStatus("DENDYGRAM • LOW-LATENCY LIVE", "#22c55e");
+        logScreen("Оверлей приховано, гра активна!", "info");
+      }
+    }
+
+    if (cloudVideo) {
+      cloudVideo.addEventListener('playing', dismissOverlay);
+      cloudVideo.addEventListener('loadeddata', () => {
+        logScreen("Відео: перші дані прибули", "info");
+        setTimeout(dismissOverlay, 500);
       });
     }
 
@@ -541,7 +549,7 @@
 
     let peer = null;
     let dataConn = null;
-    const hostPeerId = `dendygram_10out10_${roomId}`;
+    const hostPeerId = `dendygram_fastrt_${roomId}`;
 
     if (roomId && isGuest) {
       // === P2 GUEST ===
@@ -553,7 +561,7 @@
       function forcePlayVideo() {
         cloudVideo.muted = true;
         cloudVideo.play().then(() => {
-          waitingOverlay.style.display = 'none';
+          dismissOverlay();
           cloudVideo.muted = false;
         }).catch(err => {
           logScreen(`Play err: ${err.message}`, "err");
@@ -575,11 +583,17 @@
       peer.on('call', (call) => {
         call.answer();
 
+        // Сторожовий таймер проти вічного оверлею
+        const watchdog = setTimeout(() => {
+          logScreen("Watchdog: примусове відкриття екрану", "warn");
+          dismissOverlay();
+          cloudVideo.play().catch(() => {});
+        }, 2500);
+
         if (call.peerConnection) {
           call.peerConnection.ontrack = (event) => {
             if (event.receiver) {
               try {
-                // Агресивне вбивство джитер-буфера
                 if ('playoutDelayHint' in event.receiver) event.receiver.playoutDelayHint = 0;
                 if ('jitterBufferTarget' in event.receiver) event.receiver.jitterBufferTarget = 0;
               } catch(e) {}
@@ -591,11 +605,11 @@
         }
 
         call.on('stream', (remoteStream) => {
+          clearTimeout(watchdog);
           cloudVideo.srcObject = remoteStream;
           cloudVideo.play().then(() => {
-            waitingOverlay.style.display = 'none';
-            setBrandStatus("DENDYGRAM • LOW-LATENCY 10/10", "#22c55e");
-            logScreen("30 FPS стрім активний!", "info");
+            dismissOverlay();
+            logScreen("Стрім запущено миттєво!", "info");
           }).catch(() => {
             const spinner = document.querySelector('.spinner');
             if (spinner) spinner.style.display = 'none';
@@ -655,7 +669,7 @@
             }
           });
 
-          initStream10Out10(c.peer);
+          initLightweightStream(c.peer);
         });
 
         peer.on('error', (err) => logScreen(`Peer хоста: ${err.type}`, "err"));
@@ -663,16 +677,16 @@
     }
 
     // ==========================================
-    // СТРІМ ІЗ МІНІМАЛЬНИМ ІНПУТ-ЛАГОМ
+    // ЛЕГКИЙ ПОТІК (800 kbps, 30 FPS, ЧИСТИЙ ПІНГ)
     // ==========================================
-    function initStream10Out10(guestId) {
+    function initLightweightStream(guestId) {
       let tries = 0;
       const t = setInterval(() => {
         tries++;
         const canvas = document.querySelector('#game canvas');
         if (canvas && canvas.width > 50) {
           clearInterval(t);
-          logScreen(`Канвас (${canvas.width}x${canvas.height}). Формуємо потік...`, "info");
+          logScreen(`Канвас (${canvas.width}x${canvas.height}). Відправка потоку...`, "info");
           try {
             const stream = canvas.captureStream(30);
             const vTrack = stream.getVideoTracks()[0];
@@ -691,19 +705,18 @@
                   if (vSender) {
                     const p = vSender.getParameters();
                     if (!p.encodings) p.encodings = [{}];
-                    p.encodings[0].maxBitrate = 1400000;
+                    // 800 kbps для NES — ідеальна чіткість без черги буферизації
+                    p.encodings[0].maxBitrate = 800000;
                     p.encodings[0].maxFramerate = 30;
                     p.encodings[0].priority = 'high';
                     p.encodings[0].networkPriority = 'high';
-                    // Пріоритет частоти без затримки кадрів
-                    p.degradationPreference = 'maintain-framerate';
                     await vSender.setParameters(p);
                   }
                 } catch(e) {}
               });
             }
 
-            logScreen("Стрім 10/10 передано гостю!", "info");
+            logScreen("Легкий потік надіслано гостю!", "info");
           } catch(e) {
             logScreen(`Помилка captureStream: ${e.message}`, "err");
           }
@@ -716,7 +729,7 @@
     }
 
     // ==========================================
-    // КНОПКИ
+    // ОБРОБКА КНОПОК
     // ==========================================
     function handleButtonAction(btnId, isDown) {
       const val = isDown ? 1 : 0;
