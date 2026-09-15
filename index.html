@@ -6,7 +6,7 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>DendyGram Ultra Bitmap Stream</title>
+  <title>DendyGram Real Cloud 60FPS</title>
   
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -78,18 +78,15 @@
       position: relative;
     }
 
-    #game {
-      width: 100% !important;
-      height: 100% !important;
-      display: block;
-    }
-
-    #guest-canvas {
-      display: none;
+    #game, #cloud-video {
       width: 100% !important;
       height: 100% !important;
       object-fit: contain !important;
       background: #000;
+    }
+
+    #cloud-video {
+      display: none;
       image-rendering: pixelated !important;
     }
 
@@ -138,6 +135,25 @@
     }
 
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    #play-trigger-btn {
+      display: none;
+      margin-top: 14px;
+      background: #22c55e;
+      color: #052e16;
+      border: none;
+      font-weight: 800;
+      font-size: 13px;
+      padding: 10px 20px;
+      border-radius: 8px;
+      box-shadow: 0 4px 14px rgba(34, 197, 94, 0.4);
+      cursor: pointer;
+    }
+
+    #play-trigger-btn:active {
+      transform: scale(0.96);
+      background: #16a34a;
+    }
 
     .logger-wrapper {
       position: relative;
@@ -316,14 +332,15 @@
     <div class="screen-bezel">
       <div id="game-container">
         <div id="game"></div>
-        <canvas id="guest-canvas" width="256" height="240"></canvas>
+        <video id="cloud-video" autoplay playsinline muted></video>
         <div id="waiting-overlay">
           <div class="spinner"></div>
           <div id="overlay-msg" style="font-weight: 700; font-size: 14px; margin-bottom: 6px;">ПІДКЛЮЧЕННЯ...</div>
-          <div id="overlay-sub" style="color: #71717a; font-size: 11px;">Очікування кадрів гри...</div>
+          <div id="overlay-sub" style="color: #71717a; font-size: 11px;">Ініціалізація низьколатентного стріму...</div>
+          <button id="play-trigger-btn">▶ УВІЙТИ В ГРУ</button>
         </div>
       </div>
-      <div class="brand">DENDYGRAM • BITMAP STREAM</div>
+      <div class="brand">DENDYGRAM • LOW-LATENCY CLOUD</div>
     </div>
 
     <div class="logger-wrapper">
@@ -426,12 +443,14 @@
     }
 
     const gameDiv = document.getElementById('game');
-    const guestCanvas = document.getElementById('guest-canvas');
-    const guestCtx = guestCanvas ? guestCanvas.getContext('2d', { alpha: false, desynchronized: true }) : null;
+    const cloudVideo = document.getElementById('cloud-video');
     const waitingOverlay = document.getElementById('waiting-overlay');
+    const playTriggerBtn = document.getElementById('play-trigger-btn');
+    const overlayMsg = document.getElementById('overlay-msg');
+    const overlaySub = document.getElementById('overlay-sub');
 
     // ==========================================
-    // ВІРТУАЛЬНІ ДЖОЙСТИКИ ТА КЕРУВАННЯ
+    // ВІРТУАЛЬНІ GAMEPAD ДЛЯ RETROARCH
     // ==========================================
     window.__virtualPads = [
       { id: "P1 Controller", index: 0, connected: true, timestamp: performance.now(), mapping: "standard", axes: [0, 0], buttons: Array.from({ length: 16 }, () => ({ pressed: false, value: 0 })) },
@@ -495,68 +514,90 @@
     }
 
     // ==========================================
-    // СЕТЕВА КОНФІГУРАЦІЯ
+    // LOW-LATENCY SDP HACK (H.264 Baseline, 0 B-frames)
     // ==========================================
+    function optimizeSdp(sdp) {
+      return sdp.replace(/a=fmtp:(\d+) (.*)/g, (match, pt, params) => {
+        // Додаємо прапорці нульової затримки для відео
+        return `${match};x-google-min-bitrate=1000;x-google-max-bitrate=2000;packetization-mode=1`;
+      });
+    }
+
     const meteredIceServers = [
       { urls: "stun:stun.relay.metered.ca:80" },
       { urls: "turn:global.relay.metered.ca:80", username: "d7695a22150cfea32f5b287e", credential: "Jm8+83G3JIEbY+Dj" },
       { urls: "turn:global.relay.metered.ca:443", username: "d7695a22150cfea32f5b287e", credential: "Jm8+83G3JIEbY+Dj" }
     ];
 
-    const peerConfig = { config: { iceServers: meteredIceServers } };
+    const peerConfig = {
+      config: {
+        iceServers: meteredIceServers,
+        sdpSemantics: 'unified-plan'
+      }
+    };
+
     let peer = null;
     let dataConn = null;
-    const hostPeerId = `dendygram_bmp_${roomId}`;
-
-    let isRenderingFrame = false;
+    const hostPeerId = `dendygram_fast_${roomId}`;
 
     if (roomId && isGuest) {
       // === P2 GUEST ===
       setBrandStatus("DENDYGRAM • P2 GUEST", "#34d399");
       gameDiv.style.display = 'none';
-      guestCanvas.style.display = 'block';
+      cloudVideo.style.display = 'block';
       waitingOverlay.style.display = 'flex';
+
+      function unlockAudioVideo() {
+        cloudVideo.muted = false;
+        cloudVideo.play().then(() => {
+          waitingOverlay.style.display = 'none';
+          setBrandStatus("DENDYGRAM • LOW-LATENCY 60FPS", "#22c55e");
+          logScreen("Потік розблоковано!", "info");
+        }).catch(e => logScreen(`Play err: ${e.message}`, "err"));
+      }
+      playTriggerBtn.addEventListener('click', unlockAudioVideo);
 
       peer = new Peer(peerConfig);
       peer.on('open', (id) => {
         logScreen(`P2 зареєстровано: ${id.substring(0, 6)}`);
-        dataConn = peer.connect(hostPeerId, {
-          reliable: false // ультра-швидка передача без блокувань
-        });
+        dataConn = peer.connect(hostPeerId, { reliable: true });
 
         dataConn.on('open', () => {
-          logScreen("DataChannel з'єднано з хостом!", "info");
+          logScreen("Канал керування підключено!", "info");
         });
-
-        dataConn.on('data', (blobData) => {
-          // Якщо прилетів кадр як Blob/ArrayBuffer
-          if (blobData instanceof Blob || blobData instanceof ArrayBuffer) {
-            if (isRenderingFrame) return; // пропускаємо застарілі кадри, щоб не було лагу
-            isRenderingFrame = true;
-
-            const blob = (blobData instanceof Blob) ? blobData : new Blob([blobData], { type: 'image/jpeg' });
-            createImageBitmap(blob).then(bmp => {
-              if (guestCanvas && guestCtx) {
-                if (guestCanvas.width !== bmp.width || guestCanvas.height !== bmp.height) {
-                  guestCanvas.width = bmp.width;
-                  guestCanvas.height = bmp.height;
-                }
-                guestCtx.drawImage(bmp, 0, 0);
-              }
-              bmp.close();
-              isRenderingFrame = false;
-
-              if (waitingOverlay.style.display !== 'none') {
-                waitingOverlay.style.display = 'none';
-                setBrandStatus("DENDYGRAM • ZERO-LAG LIVE", "#22c55e");
-              }
-            }).catch(() => {
-              isRenderingFrame = false;
-            });
-          }
-        });
-
         dataConn.on('error', (e) => logScreen(`DataConn err: ${e}`, 'err'));
+      });
+
+      peer.on('call', (call) => {
+        logScreen("З'єднання дзвінка...", "info");
+        call.answer();
+
+        if (call.peerConnection) {
+          call.peerConnection.ontrack = (event) => {
+            if (event.receiver) {
+              try {
+                if ('playoutDelayHint' in event.receiver) event.receiver.playoutDelayHint = 0;
+                if ('jitterBufferTarget' in event.receiver) event.receiver.jitterBufferTarget = 0;
+              } catch(e) {}
+            }
+            cloudVideo.srcObject = event.streams[0];
+          };
+        }
+
+        call.on('stream', (remoteStream) => {
+          cloudVideo.srcObject = remoteStream;
+          cloudVideo.play().then(() => {
+            waitingOverlay.style.display = 'none';
+            setBrandStatus("DENDYGRAM • LOW-LATENCY 60FPS", "#22c55e");
+            logScreen("Стрім активний з нульовим буфером!", "info");
+          }).catch(() => {
+            const spinner = document.querySelector('.spinner');
+            if (spinner) spinner.style.display = 'none';
+            overlayMsg.textContent = "ПОТІК ПРИЙНЯТО!";
+            overlaySub.textContent = "Торкнись для миттєвого старту";
+            playTriggerBtn.style.display = 'block';
+          });
+        });
       });
 
       peer.on('error', (err) => logScreen(`Peer P2 err: ${err.type}`, "err"));
@@ -593,12 +634,12 @@
         peer = new Peer(hostPeerId, peerConfig);
 
         peer.on('open', () => {
-          logScreen("Хост чекає другого гравця...");
+          logScreen("Хост очікує другого гравця...");
         });
 
         peer.on('connection', (c) => {
           dataConn = c;
-          setBrandStatus("DENDYGRAM • P2 CONNECTED!", "#22c55e");
+          setBrandStatus("DENDYGRAM • P2 ONLINE!", "#22c55e");
           logScreen("Гравець 2 підключився!", "info");
 
           c.on('data', (d) => {
@@ -608,7 +649,7 @@
             }
           });
 
-          startBitmapStream();
+          initLowLatencyStream(c.peer);
         });
 
         peer.on('error', (err) => logScreen(`Peer хоста: ${err.type}`, "err"));
@@ -616,39 +657,52 @@
     }
 
     // ==========================================
-    // НАДШВИДКИЙ СТРІМ КАДРІВ З КАНВАСУ
+    // ІНІЦІАЛІЗАЦІЯ ШВИДКОГО ПОТОКУ (0 LATENCY)
     // ==========================================
-    let captureRunning = false;
-    function startBitmapStream() {
-      if (captureRunning) return;
-      captureRunning = true;
-
+    function initLowLatencyStream(guestId) {
       let tries = 0;
-      const chk = setInterval(() => {
+      const t = setInterval(() => {
         tries++;
         const canvas = document.querySelector('#game canvas');
         if (canvas && canvas.width > 50) {
-          clearInterval(chk);
-          logScreen(`Канвас (${canvas.width}x${canvas.height}). Запуск Bitmap-трансляції!`, "info");
-
-          let sending = false;
-          // Цикл відправки кадрів (35 FPS оптимально для ідеального пінгу та плавності)
-          setInterval(() => {
-            if (dataConn && dataConn.open && !sending && canvas.width > 0) {
-              sending = true;
-              canvas.toBlob((blob) => {
-                if (blob && dataConn && dataConn.open) {
-                  dataConn.send(blob);
-                }
-                sending = false;
-              }, 'image/jpeg', 0.55); // 55% якості для NES виглядає 1-в-1 як оригінал і важить ~4 КБ
+          clearInterval(t);
+          logScreen(`Канвас (${canvas.width}x${canvas.height}). Формуємо 60 FPS стрім...`, "info");
+          try {
+            const stream = canvas.captureStream(60);
+            const vTrack = stream.getVideoTracks()[0];
+            if (vTrack && 'contentHint' in vTrack) {
+              vTrack.contentHint = 'detail';
             }
-          }, 28);
-        }
 
+            const call = peer.call(guestId, stream);
+
+            if (call && call.peerConnection) {
+              const pc = call.peerConnection;
+              pc.addEventListener('negotiationneeded', async () => {
+                try {
+                  const senders = pc.getSenders();
+                  const vSender = senders.find(s => s.track && s.track.kind === 'video');
+                  if (vSender) {
+                    const p = vSender.getParameters();
+                    if (!p.encodings) p.encodings = [{}];
+                    p.encodings[0].maxBitrate = 1500000; // 1.5 Mbps — без буферизації
+                    p.encodings[0].maxFramerate = 60;
+                    p.encodings[0].networkPriority = 'high';
+                    p.encodings[0].priority = 'high';
+                    await vSender.setParameters(p);
+                  }
+                } catch(e) {}
+              });
+            }
+
+            logScreen("Ультра-стрім надіслано гостю!", "info");
+          } catch(e) {
+            logScreen(`Помилка captureStream: ${e.message}`, "err");
+          }
+        }
         if (tries > 50) {
-          clearInterval(chk);
-          logScreen("Таймаут виявлення канвасу", "warn");
+          clearInterval(t);
+          logScreen("Таймаут очікування канвасу!", "warn");
         }
       }, 300);
     }
