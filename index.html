@@ -6,7 +6,7 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>DendyGram Docs-Accurate Duo</title>
+  <title>DendyGram Clean Fix</title>
   
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -78,18 +78,23 @@
       position: relative;
     }
 
-    #game, #cloud-video {
+    #game {
       width: 100% !important;
       height: 100% !important;
-      object-fit: contain !important;
-      background: #000;
+      display: block;
     }
 
     #cloud-video {
       display: none;
+      width: 100% !important;
+      height: 100% !important;
+      object-fit: contain !important;
+      background: #000;
+      image-rendering: pixelated !important;
     }
 
-    #cloud-video, #game canvas {
+    #game canvas {
+      display: block !important;
       width: 100% !important;
       height: 100% !important;
       object-fit: contain !important;
@@ -447,11 +452,11 @@
     const overlayMsg = document.getElementById('overlay-msg');
     const overlaySub = document.getElementById('overlay-sub');
 
-    // КЛАВІШІ ДЛЯ P1 ТА P2 (СТРОГО ЗА ДОКУМЕНТАЦІЄЮ EJS)
-    const p1Keys = {
-      0: { key: 'x', code: 'KeyX', keyCode: 88 },
-      8: { key: 'z', code: 'KeyZ', keyCode: 90 },
-      2: { key: 'v', code: 'KeyV', keyCode: 86 },
+    // КЛАВІАТУРНИЙ МАППІНГ ХОСТА
+    const hostKeyMap = {
+      0: { key: 'z', code: 'KeyZ', keyCode: 90 },
+      8: { key: 'x', code: 'KeyX', keyCode: 88 },
+      2: { key: 'Shift', code: 'ShiftLeft', keyCode: 16 },
       3: { key: 'Enter', code: 'Enter', keyCode: 13 },
       4: { key: 'ArrowUp', code: 'ArrowUp', keyCode: 38 },
       5: { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40 },
@@ -459,51 +464,45 @@
       7: { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 }
     };
 
-    const p2Keys = {
-      0: { key: 'u', code: 'KeyU', keyCode: 85 }, // B
-      8: { key: 'o', code: 'KeyO', keyCode: 79 }, // A
-      2: { key: 'y', code: 'KeyY', keyCode: 89 }, // SELECT
-      3: { key: 'h', code: 'KeyH', keyCode: 72 }, // START
-      4: { key: 'i', code: 'KeyI', keyCode: 73 }, // UP
-      5: { key: 'k', code: 'KeyK', keyCode: 75 }, // DOWN
-      6: { key: 'j', code: 'KeyJ', keyCode: 74 }, // LEFT
-      7: { key: 'l', code: 'KeyL', keyCode: 76 }  // RIGHT
-    };
-
     function sendEjsInput(port, btnId, val) {
-      const map = (port === 1) ? p2Keys : p1Keys;
-      const k = map[btnId];
-      if (!k) return;
+      const isDown = (val === 1);
 
-      const evType = (val === 1) ? 'keydown' : 'keyup';
-      const canvas = document.querySelector('#game canvas');
+      if (port === 0) {
+        // ХОСТ: перевірений робочий залп клавіш
+        const k = hostKeyMap[btnId];
+        if (!k) return;
+        const evType = isDown ? 'keydown' : 'keyup';
+        const canvas = document.querySelector('#game canvas');
 
-      function emit(targetKey, targetCode, targetCodeNum) {
-        const ev = new KeyboardEvent(evType, {
-          key: targetKey,
-          code: targetCode,
-          keyCode: targetCodeNum,
-          which: targetCodeNum,
-          bubbles: true,
-          cancelable: true,
-          view: window
-        });
+        function fire(targetKey, targetCode, targetCodeNum) {
+          const ev = new KeyboardEvent(evType, {
+            key: targetKey, code: targetCode, keyCode: targetCodeNum, which: targetCodeNum,
+            bubbles: true, cancelable: true, view: window
+          });
+          window.dispatchEvent(ev);
+          document.dispatchEvent(ev);
+          if (canvas) canvas.dispatchEvent(ev);
+        }
 
-        window.dispatchEvent(ev);
-        document.dispatchEvent(ev);
-        if (canvas) canvas.dispatchEvent(ev);
-      }
-
-      // Основна клавіша
-      emit(k.key, k.code, k.keyCode);
-
-      // Дублюючий залп для P1 Select
-      if (port === 0 && btnId === 2) {
-        emit('Shift', 'ShiftLeft', 16);
+        fire(k.key, k.code, k.keyCode);
+        if (btnId === 2) {
+          fire('v', 'KeyV', 86);
+          fire('Shift', 'ShiftRight', 16);
+        }
+      } else {
+        // P2 (ГІСТЬ): прямий безпечний виклик методів емулятора
+        try {
+          const emu = window.EJS_emulator;
+          if (emu?.gameManager?.setInputValue) {
+            emu.gameManager.setInputValue(1, btnId, val);
+          } else if (emu?.controls?.simulateButton) {
+            emu.controls.simulateButton(1, btnId, val);
+          }
+        } catch(e) {}
       }
     }
 
-    // МЕРЕЖА PEERJS
+    // ICE сервери
     const meteredIceServers = [
       { urls: "stun:stun.relay.metered.ca:80" },
       { urls: "turn:global.relay.metered.ca:80", username: "d7695a22150cfea32f5b287e", credential: "Jm8+83G3JIEbY+Dj" },
@@ -516,7 +515,7 @@
     const hostPeerId = `dendygram_cloud_${roomId}`;
 
     if (roomId && isGuest) {
-      // === КЛІЄНТ (P2) ===
+      // === P2 (ГІСТЬ) ===
       setBrandStatus("DENDYGRAM • P2 GUEST", "#34d399");
       gameDiv.style.display = 'none';
       cloudVideo.style.display = 'block';
@@ -559,7 +558,7 @@
             const spinner = document.querySelector('.spinner');
             if (spinner) spinner.style.display = 'none';
             overlayMsg.textContent = "СТРІМ ГОТОВИЙ!";
-            overlaySub.textContent = "Торкнись кнопки для активації гри";
+            overlaySub.textContent = "Торкнись кнопки для входу в гру";
             playTriggerBtn.style.display = 'block';
           });
         });
@@ -568,7 +567,7 @@
       peer.on('error', (err) => logScreen(`Peer P2 err: ${err.type}`, "err"));
 
     } else {
-      // === ХОСТ (P1) ===
+      // === P1 (ХОСТ) ===
       setBrandStatus(roomId ? "DENDYGRAM • HOSTING" : "DENDYGRAM • SOLO", "#38bdf8");
 
       let cleanRom = targetRom;
@@ -577,7 +576,7 @@
         else cleanRom = decodeURIComponent(cleanRom);
       } catch (e) {}
 
-      // ОФІЦІЙНА КОНФІГУРАЦІЯ ОБОХ ПЛЕЄРІВ ЗА ДОКУМЕНТАЦІЄЮ
+      // ЧИСТИЙ СТАРТ ЕМУЛЯТОРА
       window.EJS_player = '#game';
       window.EJS_core = 'nes';
       window.EJS_gameUrl = cleanRom;
@@ -587,30 +586,6 @@
       window.EJS_disableToolbar = true;
       window.EJS_VirtualGamepadSettings = [0, 0];
       window.EJS_mouse = false;
-      window.EJS_defaultPlayers = 2;
-
-      window.EJS_defaultControls = {
-        0: {
-          0: { 'value': 'x' },          // B
-          8: { 'value': 'z' },          // A
-          2: { 'value': 'v' },          // SELECT
-          3: { 'value': 'enter' },      // START
-          4: { 'value': 'up arrow' },   // UP
-          5: { 'value': 'down arrow' }, // DOWN
-          6: { 'value': 'left arrow' }, // LEFT
-          7: { 'value': 'right arrow' } // RIGHT
-        },
-        1: {
-          0: { 'value': 'u' },          // B
-          8: { 'value': 'o' },          // A
-          2: { 'value': 'y' },          // SELECT
-          3: { 'value': 'h' },          // START
-          4: { 'value': 'i' },          // UP
-          5: { 'value': 'k' },          // DOWN
-          6: { 'value': 'j' },          // LEFT
-          7: { 'value': 'l' }           // RIGHT
-        }
-      };
 
       logScreen("Завантажуємо loader.js...", "info");
       const loader = document.createElement('script');
@@ -651,9 +626,9 @@
       const t = setInterval(() => {
         tries++;
         const canvas = document.querySelector('#game canvas');
-        if (canvas && canvas.width > 50 && window.EJS_emulator) {
+        if (canvas && canvas.width > 50) {
           clearInterval(t);
-          logScreen(`Канвас виявлено (${canvas.width}x${canvas.height})! Відправляємо потік...`, "info");
+          logScreen(`Канвас виявлено (${canvas.width}x${canvas.height})! Запуск відео...`, "info");
           try {
             const stream = canvas.captureStream(60);
             peer.call(guestId, stream);
@@ -662,7 +637,7 @@
             logScreen(`Помилка captureStream: ${e.message}`, "err");
           }
         }
-        if (tries > 40) {
+        if (tries > 50) {
           clearInterval(t);
           logScreen("Таймаут очікування канвасу!", "warn");
         }
