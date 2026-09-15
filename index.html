@@ -39,6 +39,7 @@
       flex-direction: column;
       padding: 12px 8px;
       touch-action: none;
+      position: relative;
     }
 
     .screen-bezel {
@@ -69,10 +70,6 @@
       border-radius: 6px;
       overflow: hidden;
       position: relative;
-      image-rendering: -moz-crisp-edges;
-      image-rendering: -webkit-crisp-edges;
-      image-rendering: pixelated;
-      image-rendering: crisp-edges;
     }
 
     #game {
@@ -135,12 +132,35 @@
 
     @keyframes spin { to { transform: rotate(360deg); } }
 
+    /* ЕКРАННИЙ ЛОГЕР ПО ЦЕНТРУ КОРПУСУ */
+    #screen-logger {
+      margin: 6px 4px;
+      height: 90px;
+      background: rgba(10, 10, 14, 0.85);
+      border: 1px solid #3f3f46;
+      border-radius: 8px;
+      padding: 6px 8px;
+      font-family: monospace;
+      font-size: 10px;
+      line-height: 1.35;
+      color: #22c55e;
+      overflow-y: auto;
+      word-break: break-all;
+      box-shadow: inset 0 2px 5px rgba(0,0,0,0.8);
+      z-index: 50;
+      pointer-events: auto;
+    }
+
+    .log-err { color: #ef4444; font-weight: bold; }
+    .log-warn { color: #facc15; }
+    .log-info { color: #38bdf8; }
+
     .controls {
       flex: 1;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
-      padding: 16px 4px 10px;
+      padding: 4px 4px 10px;
     }
 
     .main-pads {
@@ -218,14 +238,14 @@
       display: flex;
       justify-content: center;
       gap: 40px;
-      margin-bottom: 8px;
+      margin-bottom: 4px;
     }
 
     .sys-btn-wrap {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
     }
 
     .sys-btn {
@@ -267,6 +287,9 @@
       <div class="brand">DENDYGRAM • PORTABLE</div>
     </div>
 
+    <!-- ВІКНО НАОЧНИХ ЛОГІВ ПРЯМО НА КОРПУСІ -->
+    <div id="screen-logger"></div>
+
     <div class="controls">
       <div class="main-pads">
         <div class="dpad">
@@ -297,6 +320,29 @@
   </div>
 
   <script>
+    // ==========================================
+    // ЛОГЕР НА ДИСПЛЕЙ
+    // ==========================================
+    const loggerEl = document.getElementById('screen-logger');
+    function logScreen(msg, type = 'normal') {
+      if (!loggerEl) return;
+      const d = document.createElement('div');
+      const time = new Date().toTimeString().split(' ')[0].substring(3);
+      d.textContent = `[${time}] ${msg}`;
+      if (type === 'err') d.className = 'log-err';
+      else if (type === 'warn') d.className = 'log-warn';
+      else if (type === 'info') d.className = 'log-info';
+      loggerEl.appendChild(d);
+      loggerEl.scrollTop = loggerEl.scrollHeight;
+    }
+
+    window.onerror = function(msg, url, line) {
+      logScreen(`ERR: ${msg} (рядок ${line})`, 'err');
+      return false;
+    };
+
+    logScreen("Ініціалізація WebApp...", "info");
+
     const tg = window.Telegram?.WebApp;
     if (tg) {
       tg.expand();
@@ -304,9 +350,14 @@
     }
 
     function decodeBase64Url(str) {
+      if (!str) return '';
       str = str.replace(/-/g, '+').replace(/_/g, '/');
       while (str.length % 4) str += '=';
-      return decodeURIComponent(escape(atob(str)));
+      try {
+        return decodeURIComponent(escape(atob(str)));
+      } catch (e) {
+        return atob(str);
+      }
     }
 
     const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
@@ -317,8 +368,9 @@
     if (rawApp) {
       try {
         appData = JSON.parse(decodeBase64Url(rawApp));
+        logScreen("appData успішно розпарсено", "info");
       } catch (e) {
-        console.error("appData parse error:", e);
+        logScreen("Помилка JSON appData: " + e.message, "err");
       }
     }
 
@@ -326,6 +378,8 @@
     const roomId = appData.room || hashParams.get('room') || urlParams.get('room');
     const rawP = appData.p || hashParams.get('player') || hashParams.get('p') || urlParams.get('player') || urlParams.get('p');
     const isGuest = (rawP == 2 || rawP === '2');
+
+    logScreen(`Роль: ${isGuest ? 'P2 (Клієнт)' : 'P1 (Хост)'} | Кімната: ${roomId || 'Соло'}`);
 
     const brandElem = document.querySelector('.brand');
     const waitingOverlay = document.getElementById('waiting-overlay');
@@ -360,30 +414,45 @@
 
     let peer = null;
     let dataConn = null;
+    let guestPeerId = null;
     const hostPeerId = `dendygram_fast_stream_${roomId}`;
 
     function sendEjsInput(port, btnId, val) {
+      let triggered = false;
       try {
         if (window.EJS_emulator?.controls?.simulateButton) {
           window.EJS_emulator.controls.simulateButton(port, btnId, val);
+          triggered = true;
         } else if (window.EJS_emulator?.gameManager?.setInputValue) {
           window.EJS_emulator.gameManager.setInputValue(port, btnId, val);
+          triggered = true;
         }
-      } catch (e) {}
+      } catch (e) {
+        logScreen(`Помилка інпуту P${port+1}: ${e.message}`, "err");
+      }
+      return triggered;
     }
 
     function startHostEmulator() {
+      if (!targetRom) {
+        logScreen("ERR: targetRom порожній!", "err");
+        return;
+      }
+
+      let cleanRom = targetRom;
       try {
-        if (!targetRom.startsWith('http')) {
-          targetRom = decodeBase64Url(targetRom);
+        if (!cleanRom.startsWith('http')) {
+          cleanRom = decodeBase64Url(cleanRom);
         } else {
-          targetRom = decodeURIComponent(targetRom);
+          cleanRom = decodeURIComponent(cleanRom);
         }
       } catch (e) {}
 
+      logScreen(`ROM URL: ${cleanRom.substring(0, 35)}...`, "info");
+
       window.EJS_player = '#game';
       window.EJS_core = 'nes';
-      window.EJS_gameUrl = targetRom;
+      window.EJS_gameUrl = cleanRom;
       window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
       window.EJS_startOnLoaded = true;
       window.EJS_alignStartButton = false;
@@ -391,20 +460,16 @@
       window.EJS_VirtualGamepadSettings = [0, 0];
       window.EJS_mouse = false;
 
-      window.EJS_onGameStart = function() {
-        console.log("Емулятор готовий до гри!");
-        if (roomId && peer && dataConn) {
-          streamCanvasWithHardwareFps(dataConn.peer);
-        }
-      };
-
+      logScreen("Завантаження loader.js...", "info");
       const loader = document.createElement('script');
       loader.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
+      loader.onload = () => logScreen("loader.js успішно завантажено");
+      loader.onerror = () => logScreen("Помилка завантаження loader.js!", "err");
       document.body.appendChild(loader);
     }
 
     if (roomId && isGuest) {
-      // === PLAYER 2 (КЛІЄНТ СТРІМУ) ===
+      // === PLAYER 2 (КЛІЄНТ) ===
       setBrandStatus("DENDYGRAM • DUO (P2)", "#34d399");
       waitingOverlay.style.display = 'flex';
 
@@ -423,22 +488,34 @@
         video.addEventListener('playing', () => {
           waitingOverlay.style.display = 'none';
           setBrandStatus("DENDYGRAM • 30 FPS LIVE", "#22c55e");
+          logScreen("Відеопотік від хоста грає!", "info");
         });
       }
 
+      logScreen("Створення Peer для P2...", "info");
       peer = new Peer(peerConfig);
 
-      peer.on('open', () => {
+      peer.on('open', (id) => {
+        logScreen(`P2 зареєстровано: ${id.substring(0, 10)}...`);
         dataConn = peer.connect(hostPeerId, { reliable: false });
+
+        dataConn.on('open', () => {
+          logScreen("DataChannel з хостом відкрито!", "info");
+        });
+        dataConn.on('error', (err) => logScreen(`DataChannel помилка: ${err}`, "err"));
       });
 
       peer.on('call', (call) => {
+        logScreen("Отримано відеовиклик від хоста!", "info");
         call.answer();
         call.on('stream', (stream) => {
+          logScreen("Отримано медіапотік WebRTC", "info");
           video.srcObject = stream;
-          video.play().catch(e => console.warn("Autoplay block:", e));
+          video.play().catch(e => logScreen(`Autoplay помилка: ${e.message}`, "warn"));
         });
       });
+
+      peer.on('error', (err) => logScreen(`Peer помилка P2: ${err.type}`, "err"));
 
     } else {
       // === ХОСТ (P1) АБО СОЛО ===
@@ -446,55 +523,75 @@
       startHostEmulator();
 
       if (roomId) {
+        logScreen(`Реєстрація хоста ID: ${hostPeerId}`);
         peer = new Peer(hostPeerId, peerConfig);
+
+        peer.on('open', () => logScreen("Хост очікує гравця 2...", "info"));
 
         peer.on('connection', (c) => {
           dataConn = c;
+          guestPeerId = c.peer;
           setBrandStatus("DENDYGRAM • P2 ONLINE!", "#22c55e");
+          logScreen(`Гравець 2 підключився: ${c.peer.substring(0, 10)}...`, "info");
 
           c.on('data', (d) => {
             if (d && d.b !== undefined) {
-              sendEjsInput(1, d.b, d.v);
+              const ok = sendEjsInput(1, d.b, d.v);
+              logScreen(`Інпут P2: btn=${d.b} val=${d.v} (${ok ? 'OK' : 'WAIT'})`);
             }
           });
 
-          streamCanvasWithHardwareFps(c.peer);
+          checkAndStreamCanvas();
         });
+
+        peer.on('error', (err) => logScreen(`Peer помилка хоста: ${err.type}`, "err"));
       }
     }
 
-    function streamCanvasWithHardwareFps(targetPeerId) {
-      const check = setInterval(() => {
+    function checkAndStreamCanvas() {
+      if (!guestPeerId || !peer) return;
+      logScreen("Очікування готовності канвасу...", "info");
+
+      let counter = 0;
+      const interval = setInterval(() => {
+        counter++;
         const canvas = document.querySelector('#game canvas');
-        if (canvas && canvas.width > 100 && window.EJS_emulator) {
-          clearInterval(check);
+        if (canvas && canvas.width > 200 && window.EJS_emulator) {
+          clearInterval(interval);
+          logScreen(`Канвас готовий (${canvas.width}x${canvas.height}). Запуск стріму...`, "info");
 
-          const stream = canvas.captureStream(30);
-          const track = stream.getVideoTracks()[0];
+          try {
+            const stream = canvas.captureStream(30);
+            const track = stream.getVideoTracks()[0];
+            if (track && 'contentHint' in track) track.contentHint = 'detail';
 
-          if (track && 'contentHint' in track) {
-            track.contentHint = 'detail';
-          }
+            const call = peer.call(guestPeerId, stream);
 
-          const call = peer.call(targetPeerId, stream);
-
-          if (call && call.peerConnection) {
-            call.peerConnection.addEventListener('negotiationneeded', async () => {
-              try {
-                const senders = call.peerConnection.getSenders();
-                const videoSender = senders.find(s => s.track && s.track.kind === 'video');
-                if (videoSender) {
-                  const params = videoSender.getParameters();
-                  if (!params.encodings) params.encodings = [{}];
-                  params.encodings[0].maxBitrate = 2500000;
-                  params.encodings[0].maxFramerate = 30;
-                  await videoSender.setParameters(params);
-                }
-              } catch (e) {}
-            });
+            if (call && call.peerConnection) {
+              call.peerConnection.addEventListener('negotiationneeded', async () => {
+                try {
+                  const senders = call.peerConnection.getSenders();
+                  const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+                  if (videoSender) {
+                    const params = videoSender.getParameters();
+                    if (!params.encodings) params.encodings = [{}];
+                    params.encodings[0].maxBitrate = 2500000;
+                    params.encodings[0].maxFramerate = 30;
+                    await videoSender.setParameters(params);
+                  }
+                } catch (e) {}
+              });
+            }
+            logScreen("Дзвінок WebRTC надіслано гостю!", "info");
+          } catch (err) {
+            logScreen(`captureStream помилка: ${err.message}`, "err");
           }
         }
-      }, 300);
+        if (counter > 40) {
+          clearInterval(interval);
+          logScreen("Таймаут очікування канвасу!", "warn");
+        }
+      }, 500);
     }
 
     function handleInputPress(btnId, isDown) {
@@ -503,11 +600,15 @@
       if (roomId && isGuest) {
         if (dataConn && dataConn.open) {
           dataConn.send({ b: btnId, v: val });
+          logScreen(`P2 таск: btn=${btnId} val=${val}`);
+        } else {
+          logScreen("DataChannel не готовий!", "warn");
         }
         return;
       }
 
-      sendEjsInput(0, btnId, val);
+      const ok = sendEjsInput(0, btnId, val);
+      logScreen(`P1 тап: btn=${btnId} val=${val} (${ok ? 'OK' : 'WAIT'})`);
     }
 
     document.querySelectorAll('[data-btn]').forEach(elem => {
