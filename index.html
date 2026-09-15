@@ -6,7 +6,7 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>DendyGram Cloud Stream</title>
+  <title>DendyGram Clean Cloud</title>
   
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -447,80 +447,50 @@
     const overlaySub = document.getElementById('overlay-sub');
 
     // ==========================================
-    // ВІРТУАЛЬНИЙ GAMEPAD API ДЛЯ RETROARCH P2
+    // РОЗДІЛЬНІ КЛАВІШІ ДЛЯ ДВОХ ГРАВЦІВ
     // ==========================================
-    window.__p2Gamepad = {
-      id: "DendyGram Virtual Controller",
-      index: 1,
-      connected: true,
-      timestamp: performance.now(),
-      mapping: "standard",
-      axes: [0, 0, 0, 0],
-      buttons: Array.from({ length: 16 }, () => ({ pressed: false, value: 0 }))
+    const p1KeyMap = {
+      0: { key: 'z', code: 'KeyZ', keyCode: 90 },
+      8: { key: 'x', code: 'KeyX', keyCode: 88 },
+      2: { key: 'Shift', code: 'ShiftLeft', keyCode: 16 },
+      3: { key: 'Enter', code: 'Enter', keyCode: 13 },
+      4: { key: 'ArrowUp', code: 'ArrowUp', keyCode: 38 },
+      5: { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40 },
+      6: { key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37 },
+      7: { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 }
     };
 
-    const origGetGamepads = navigator.getGamepads ? navigator.getGamepads.bind(navigator) : null;
-    navigator.getGamepads = function() {
-      const pads = origGetGamepads ? Array.from(origGetGamepads()) : [null, null];
-      pads[1] = window.__p2Gamepad;
-      return pads;
-    };
-
-    const nesToGamepadIndex = {
-      0: 0,   // B
-      8: 1,   // A
-      2: 8,   // SELECT
-      3: 9,   // START
-      4: 12,  // UP
-      5: 13,  // DOWN
-      6: 14,  // LEFT
-      7: 15   // RIGHT
+    const p2KeyMap = {
+      0: { key: 'u', code: 'KeyU', keyCode: 85 }, // B
+      8: { key: 'o', code: 'KeyO', keyCode: 79 }, // A
+      2: { key: 'y', code: 'KeyY', keyCode: 89 }, // SELECT
+      3: { key: 'h', code: 'KeyH', keyCode: 72 }, // START
+      4: { key: 'i', code: 'KeyI', keyCode: 73 }, // UP
+      5: { key: 'k', code: 'KeyK', keyCode: 75 }, // DOWN
+      6: { key: 'j', code: 'KeyJ', keyCode: 74 }, // LEFT
+      7: { key: 'l', code: 'KeyL', keyCode: 76 }  // RIGHT
     };
 
     function sendEjsInput(port, btnId, val) {
-      const emu = window.EJS_emulator;
-      const isDown = val === 1;
+      const map = (port === 1) ? p2KeyMap : p1KeyMap;
+      const k = map[btnId];
+      if (!k) return false;
 
-      if (port === 1) {
-        const padIdx = nesToGamepadIndex[btnId];
-        if (padIdx !== undefined && window.__p2Gamepad) {
-          window.__p2Gamepad.buttons[padIdx].pressed = isDown;
-          window.__p2Gamepad.buttons[padIdx].value = isDown ? 1.0 : 0.0;
-          window.__p2Gamepad.timestamp = performance.now();
-        }
-
-        try {
-          if (emu?.controls?.simulateButton) emu.controls.simulateButton(1, btnId, val);
-          if (emu?.gameManager?.setInputValue) emu.gameManager.setInputValue(1, btnId, val);
-        } catch(e) {}
-        return true;
-      }
-
-      const evType = isDown ? 'keydown' : 'keyup';
+      const evType = (val === 1) ? 'keydown' : 'keyup';
       const canvas = document.querySelector('#game canvas');
-      function fireKey(k, c, codeNum) {
-        const ev = new KeyboardEvent(evType, {
-          key: k, code: c, keyCode: codeNum, which: codeNum,
-          bubbles: true, cancelable: true, view: window
-        });
-        if (canvas) canvas.dispatchEvent(ev);
-        window.dispatchEvent(ev);
-      }
 
-      if (btnId === 2) {
-        fireKey('Shift', 'ShiftLeft', 16);
-        fireKey('v', 'KeyV', 86);
-      } else if (btnId === 3) fireKey('Enter', 'Enter', 13);
-      else if (btnId === 0) fireKey('z', 'KeyZ', 90);
-      else if (btnId === 8) fireKey('x', 'KeyX', 88);
-      else if (btnId === 4) fireKey('ArrowUp', 'ArrowUp', 38);
-      else if (btnId === 5) fireKey('ArrowDown', 'ArrowDown', 40);
-      else if (btnId === 6) fireKey('ArrowLeft', 'ArrowLeft', 37);
-      else if (btnId === 7) fireKey('ArrowRight', 'ArrowRight', 39);
+      const ev = new KeyboardEvent(evType, {
+        key: k.key,
+        code: k.code,
+        keyCode: k.keyCode,
+        which: k.keyCode,
+        bubbles: true,
+        cancelable: true,
+        view: window
+      });
 
-      try {
-        if (emu?.controls?.simulateButton) emu.controls.simulateButton(0, btnId, val);
-      } catch(e) {}
+      if (canvas) canvas.dispatchEvent(ev);
+      window.dispatchEvent(ev);
       return true;
     }
 
@@ -614,7 +584,7 @@
             setBrandStatus("DENDYGRAM • 60 FPS LIVE", "#22c55e");
             logScreen("Автоплей спрацював!", "info");
           }).catch(() => {
-            logScreen("Автоплей блоковано браузером. Натисни кнопку!", "warn");
+            logScreen("Потрібен клік: натисни кнопку!", "warn");
             const spinner = document.querySelector('.spinner');
             if (spinner) spinner.style.display = 'none';
             overlayMsg.textContent = "ПОТІК ГОТОВИЙ!";
@@ -648,6 +618,18 @@
       window.EJS_VirtualGamepadSettings = [0, 0];
       window.EJS_mouse = false;
       window.EJS_defaultPlayers = 2;
+
+      // Жорстко задаємо різні клавіші для портів 0 та 1 в ядрі
+      window.EJS_defaultControls = {
+        0: {
+          0: { value: 'z' }, 8: { value: 'x' }, 2: { value: 'shift' }, 3: { value: 'enter' },
+          4: { value: 'up' }, 5: { value: 'down' }, 6: { value: 'left' }, 7: { value: 'right' }
+        },
+        1: {
+          0: { value: 'u' }, 8: { value: 'o' }, 2: { value: 'y' }, 3: { value: 'h' },
+          4: { value: 'i' }, 5: { value: 'k' }, 6: { value: 'j' }, 7: { value: 'l' }
+        }
+      };
 
       logScreen("Завантажуємо емулятор...", "info");
       const loader = document.createElement('script');
