@@ -6,7 +6,7 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>DendyGram RAM Stream</title>
+  <title>DendyGram Fix</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <style>
@@ -68,7 +68,8 @@
 
     #game-container {
       width: 100%;
-      aspect-ratio: 4 / 3;
+      height: 240px;
+      min-height: 240px;
       background: #000;
       border-radius: 6px;
       overflow: hidden;
@@ -78,6 +79,7 @@
     #game {
       width: 100% !important;
       height: 100% !important;
+      display: block !important;
     }
 
     #game canvas {
@@ -107,7 +109,7 @@
     }
 
     #screen-logger {
-      height: 80px;
+      height: 75px;
       background: rgba(10, 10, 14, 0.92);
       border: 1px solid #3f3f46;
       border-radius: 8px;
@@ -279,7 +281,7 @@
       <div id="game-container">
         <div id="game"></div>
       </div>
-      <div class="brand">DENDYGRAM • RAM STREAM</div>
+      <div class="brand">DENDYGRAM • PORTABLE</div>
     </div>
 
     <div class="logger-wrapper">
@@ -341,6 +343,11 @@
       });
     }
 
+    window.onerror = function(msg, url, line) {
+      logScreen(`CRASH: ${msg} (L:${line})`, 'err');
+      return false;
+    };
+
     const tg = window.Telegram?.WebApp;
     if (tg) { tg.expand(); tg.ready(); }
 
@@ -379,12 +386,12 @@
     setBrandStatus(`DENDYGRAM • ${isGuest ? 'P2 (GUEST)' : 'P1 (HOST)'}`, isGuest ? '#34d399' : '#38bdf8');
     logScreen(`Роль: ${isGuest ? 'P2' : 'P1'} | Кімната: ${roomId || 'Соло'}`);
 
-    // --- КЛАВІАТУРНИЙ МАППІНГ ДЛЯ ДВОХ ПОРТІВ ---
+    // --- КЛАВІШІ ДЛЯ ДВОХ ГРАВЦІВ ---
     const p1Keys = {
-      0: { code: 'KeyZ', key: 'z', keyCode: 90 },       // B
-      8: { code: 'KeyX', key: 'x', keyCode: 88 },       // A
-      2: { code: 'ShiftRight', key: 'Shift', keyCode: 16 }, // SELECT
-      3: { code: 'Enter', key: 'Enter', keyCode: 13 },   // START
+      0: { code: 'KeyZ', key: 'z', keyCode: 90 },
+      8: { code: 'KeyX', key: 'x', keyCode: 88 },
+      2: { code: 'ShiftRight', key: 'Shift', keyCode: 16 },
+      3: { code: 'Enter', key: 'Enter', keyCode: 13 },
       4: { code: 'ArrowUp', key: 'ArrowUp', keyCode: 38 },
       5: { code: 'ArrowDown', key: 'ArrowDown', keyCode: 40 },
       6: { code: 'ArrowLeft', key: 'ArrowLeft', keyCode: 37 },
@@ -392,24 +399,17 @@
     };
 
     const p2Keys = {
-      0: { code: 'KeyQ', key: 'q', keyCode: 81 },       // B
-      8: { code: 'KeyE', key: 'e', keyCode: 69 },       // A
-      2: { code: 'KeyT', key: 't', keyCode: 84 },       // SELECT
-      3: { code: 'KeyY', key: 'y', keyCode: 89 },       // START
-      4: { code: 'KeyI', key: 'i', keyCode: 73 },       // UP
-      5: { code: 'KeyK', key: 'k', keyCode: 75 },       // DOWN
-      6: { code: 'KeyJ', key: 'j', keyCode: 74 },       // LEFT
-      7: { code: 'KeyL', key: 'l', keyCode: 76 }        // RIGHT
+      0: { code: 'KeyQ', key: 'q', keyCode: 81 },
+      8: { code: 'KeyE', key: 'e', keyCode: 69 },
+      2: { code: 'KeyT', key: 't', keyCode: 84 },
+      3: { code: 'KeyY', key: 'y', keyCode: 89 },
+      4: { code: 'KeyI', key: 'i', keyCode: 73 },
+      5: { code: 'KeyK', key: 'k', keyCode: 75 },
+      6: { code: 'KeyJ', key: 'j', keyCode: 74 },
+      7: { code: 'KeyL', key: 'l', keyCode: 76 }
     };
 
     function sendEjsInput(port, btnId, val) {
-      const emu = window.EJS_emulator;
-      let handled = false;
-
-      if (emu?.controls?.simulateButton) {
-        try { emu.controls.simulateButton(port, btnId, val); handled = true; } catch (e) {}
-      }
-
       const keyMap = (port === 1) ? p2Keys : p1Keys;
       const keyInfo = keyMap[btnId];
       if (keyInfo) {
@@ -428,12 +428,10 @@
         const canvas = document.querySelector('#game canvas');
         if (canvas) canvas.dispatchEvent(ev);
         window.dispatchEvent(ev);
-        handled = true;
       }
-      return handled;
     }
 
-    // --- ЗАПУСК ЕМУЛЯТОРА ---
+    // --- ЧИСТИЙ СТАРТ ЕМУЛЯТОРА БЕЗ КРАШ-ПАРАМЕТРІВ ---
     let cleanRom = targetRom;
     try {
       if (!cleanRom.startsWith('http')) cleanRom = decodeBase64Url(cleanRom);
@@ -450,21 +448,11 @@
     window.EJS_VirtualGamepadSettings = [0, 0];
     window.EJS_mouse = false;
 
-    window.EJS_defaultControls = {
-      0: {
-        0: { value: 'z' }, 8: { value: 'x' }, 2: { value: 'rshift' }, 3: { value: 'enter' },
-        4: { value: 'up' }, 5: { value: 'down' }, 6: { value: 'left' }, 7: { value: 'right' }
-      },
-      1: {
-        0: { value: 'q' }, 8: { value: 'e' }, 2: { value: 't' }, 3: { value: 'y' },
-        4: { value: 'i' }, 5: { value: 'k' }, 6: { value: 'j' }, 7: { value: 'l' }
-      }
-    };
-
-    let p2Locked = isGuest;
-
+    logScreen("Завантаження loader.js...", "info");
     const loader = document.createElement('script');
     loader.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
+    loader.onload = () => logScreen("loader.js завантажено успішно!");
+    loader.onerror = () => logScreen("CDN loader.js недоступний!", "err");
     document.body.appendChild(loader);
 
     // --- P2P ПІДКЛЮЧЕННЯ ---
@@ -483,13 +471,12 @@
       const peerConfig = { config: { iceServers: meteredIceServers } };
 
       if (!isGuest) {
-        // ХОСТ (P1)
+        // ХОСТ
         peer = new Peer(hostPeerId, peerConfig);
-
         peer.on('connection', (c) => {
           dataConn = c;
-          setBrandStatus("DENDYGRAM • DUO STREAMING!", "#22c55e");
-          logScreen("P2 підключено! Запуск потоку стейту 100мс...", "info");
+          setBrandStatus("DENDYGRAM • DUO ONLINE!", "#22c55e");
+          logScreen("P2 зайшов! Стрім стейту 100мс активовано", "info");
 
           c.on('data', (d) => {
             if (d.t === 'INP') {
@@ -497,21 +484,18 @@
             }
           });
 
-          // Постійний стрім RAM по КД (кожні 100 мс)
           if (streamInterval) clearInterval(streamInterval);
           streamInterval = setInterval(broadcastState, 100);
         });
-
       } else {
-        // ГІСТЬ (P2)
+        // ГІСТЬ
         peer = new Peer(peerConfig);
-
         peer.on('open', () => {
           dataConn = peer.connect(hostPeerId, { reliable: false });
 
           dataConn.on('open', () => {
-            setBrandStatus("DENDYGRAM • DUO CONNECTED!", "#22c55e");
-            logScreen("З'єднано! Очікуємо перший стейт...", "info");
+            setBrandStatus("DENDYGRAM • DUO ONLINE!", "#22c55e");
+            logScreen("З'єднано з хостом!", "info");
           });
 
           dataConn.on('data', (d) => {
@@ -525,7 +509,6 @@
       }
     }
 
-    // Відправка стейту хостом
     function broadcastState() {
       if (!dataConn || !dataConn.open) return;
       try {
@@ -539,21 +522,15 @@
       } catch (e) {}
     }
 
-    // Застосування стейту клієнтом
     function applyIncomingState(buffer) {
       try {
         const emu = window.EJS_emulator;
         if (emu?.gameManager?.loadState) {
           emu.gameManager.loadState(new Uint8Array(buffer));
-          if (p2Locked) {
-            p2Locked = false;
-            logScreen("Перший стейт прийнято! Гру розблоковано", "info");
-          }
         }
       } catch (e) {}
     }
 
-    // Керування кнопками
     function handleButtonAction(btnId, isDown) {
       const val = isDown ? 1 : 0;
 
