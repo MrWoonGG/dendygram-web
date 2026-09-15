@@ -6,7 +6,7 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>DendyGram 30FPS WRAM Sync</title>
+  <title>DendyGram Turbo State Sync</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <style>
@@ -278,7 +278,7 @@
       <div id="game-container">
         <div id="game"></div>
       </div>
-      <div class="brand">DENDYGRAM • 30 FPS WRAM</div>
+      <div class="brand">DENDYGRAM • TURBO SYNC</div>
     </div>
 
     <div class="logger-wrapper">
@@ -383,23 +383,24 @@
     setBrandStatus(`DENDYGRAM • ${isGuest ? 'P2 (GUEST)' : 'P1 (HOST)'}`, isGuest ? '#34d399' : '#38bdf8');
     logScreen(`Роль: ${isGuest ? 'P2' : 'P1'} | Кімната: ${roomId || 'Соло'}`);
 
-    // --- РОБОТА З WRAM 2048 БАЙТ ТА ПОРТАМИ ---
+    // --- ДРОБОВИК ДЛЯ КЕРУВАННЯ P1 ТА P2 ---
     function sendEjsInput(port, btnId, val) {
       const emu = window.EJS_emulator;
       let ok = false;
 
+      // 1. Прямий інпут у порт
       try {
-        if (emu?.gameManager?.setInputValue) {
-          emu.gameManager.setInputValue(port, btnId, val);
-          ok = true;
-        }
         if (emu?.controls?.simulateButton) {
           emu.controls.simulateButton(port, btnId, val);
           ok = true;
         }
+        if (emu?.gameManager?.setInputValue) {
+          emu.gameManager.setInputValue(port, btnId, val);
+          ok = true;
+        }
       } catch (e) {}
 
-      // Для Хоста дублюємо клавішами
+      // 2. Для P1 стріляємо подіями клавіатури
       if (port === 0) {
         const evType = val ? 'keydown' : 'keyup';
         const canvas = document.querySelector('#game canvas');
@@ -423,44 +424,15 @@
         else if (btnId === 6) fireKey('ArrowLeft', 'ArrowLeft', 37);
         else if (btnId === 7) fireKey('ArrowRight', 'ArrowRight', 39);
       }
+
       return ok;
-    }
-
-    function getRawNesRam() {
-      try {
-        if (window.Module && window.Module.HEAPU8 && window.Module._retro_get_memory_data) {
-          const ptr = window.Module._retro_get_memory_data(0);
-          if (ptr) {
-            return new Uint8Array(window.Module.HEAPU8.buffer, ptr, 2048).slice();
-          }
-        }
-        const emu = window.EJS_emulator;
-        if (emu?.gameManager?.getState) {
-          const fullState = emu.gameManager.getState();
-          if (fullState && fullState.length >= 2048) {
-            return fullState.slice(0, 2048);
-          }
-        }
-      } catch (e) {}
-      return null;
-    }
-
-    function setRawNesRam(ramChunk) {
-      try {
-        if (window.Module && window.Module.HEAPU8 && window.Module._retro_get_memory_data) {
-          const ptr = window.Module._retro_get_memory_data(0);
-          if (ptr) {
-            window.Module.HEAPU8.set(ramChunk, ptr);
-          }
-        }
-      } catch (e) {}
     }
 
     // --- СТАРТ ЕМУЛЯТОРА ---
     let cleanRom = targetRom;
     try {
       if (cleanRom.startsWith('http')) {
-        try { cleanRom = decodeURIComponent(cleanRom); } catch(e) {}
+        try { cleanRom = decodeURIComponent(cleanRom); } catch (e) {}
       } else {
         cleanRom = decodeBase64Url(cleanRom);
       }
@@ -475,15 +447,16 @@
     window.EJS_disableToolbar = true;
     window.EJS_VirtualGamepadSettings = [0, 0];
     window.EJS_mouse = false;
+    window.EJS_defaultPlayers = 2;
 
     const loader = document.createElement('script');
     loader.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
     loader.async = true;
-    loader.onload = () => logScreen("Ядро завантажено!");
-    loader.onerror = () => logScreen("Помилка CDN ядра!", "err");
+    loader.onload = () => logScreen("loader.js завантажено успішно!");
+    loader.onerror = () => logScreen("CDN loader.js недоступний!", "err");
     document.head.appendChild(loader);
 
-    // --- P2P МЕРЕЖА ---
+    // --- P2P ПІДКЛЮЧЕННЯ (RELIABLE: TRUE ДЛЯ 100% ДОСТАВКИ) ---
     const meteredIceServers = [
       { urls: "stun:stun.relay.metered.ca:80" },
       { urls: "turn:global.relay.metered.ca:80", username: "d7695a22150cfea32f5b287e", credential: "Jm8+83G3JIEbY+Dj" },
@@ -492,7 +465,7 @@
 
     let peer = null;
     let dataConn = null;
-    let ramInterval = null;
+    let streamInterval = null;
     const hostPeerId = `dendygram_ram_${roomId}`;
 
     if (roomId) {
@@ -502,95 +475,97 @@
         // === ХОСТ (P1) ===
         peer = new Peer(hostPeerId, peerConfig);
 
+        peer.on('open', () => logScreen("Хост очікує гостя..."));
+
         peer.on('connection', (c) => {
           dataConn = c;
-          setBrandStatus("DENDYGRAM • 30 FPS LIVE", "#22c55e");
-          logScreen("P2 зайшов! Синхронізація стартового стейту...", "info");
+          setBrandStatus("DENDYGRAM • DUO (50MS SYNC)", "#22c55e");
+          logScreen("P2 зайшов! Канал з'єднано", "info");
 
-          // 1. Повний стейт тільки на старті
-          setTimeout(() => {
-            sendFullInitialState();
-          }, 1500);
+          c.on('open', () => {
+            logScreen("DataChannel повністю готовий!", "info");
+          });
 
-          // Обробка кнопок від P2 напряму в порт 1
           c.on('data', (d) => {
             if (d.t === 'INP') {
-              sendEjsInput(1, d.b, d.v);
+              const res = sendEjsInput(1, d.b, d.v);
+              logScreen(`P2 TAP -> btn=${d.b} val=${d.v} (${res ? 'OK' : 'FAIL'})`);
             }
           });
 
-          // 2. Стрім 2048 байт RAM кожні 33 мс (30 FPS)
-          if (ramInterval) clearInterval(ramInterval);
-          ramInterval = setInterval(streamFastRam, 33);
+          // Стрім повного стейту кожні 0.05 сек (50 мс)
+          if (streamInterval) clearInterval(streamInterval);
+          streamInterval = setInterval(broadcastFullState, 50);
         });
+
+        peer.on('error', (err) => logScreen(`Peer хоста: ${err.type}`, "err"));
 
       } else {
         // === ГІСТЬ (P2) ===
         peer = new Peer(peerConfig);
 
         peer.on('open', () => {
-          logScreen("P2 підключається до хоста...", "info");
-          dataConn = peer.connect(hostPeerId, { reliable: false });
+          logScreen("P2 зареєстрований, конектимось...", "info");
+          // reliable: true щоб пакети інпутів не губилися в дорозі
+          dataConn = peer.connect(hostPeerId, { reliable: true });
 
           dataConn.on('open', () => {
-            setBrandStatus("DENDYGRAM • 30 FPS LIVE", "#22c55e");
-            logScreen("Канал відкрито! Очікуємо синхрон...", "info");
+            setBrandStatus("DENDYGRAM • DUO (50MS SYNC)", "#22c55e");
+            logScreen("Канал кнопок відкрито!", "info");
           });
 
           dataConn.on('data', (d) => {
-            if (d.t === 'INIT_STATE' && d.b) {
-              if (window.EJS_emulator?.gameManager?.loadState) {
-                window.EJS_emulator.gameManager.loadState(new Uint8Array(d.b));
-                logScreen("Початковий стейт накладено!", "info");
-              }
-            } else if (d.t === 'RAM' && d.b) {
-              setRawNesRam(new Uint8Array(d.b));
-            } else if (d.t === 'P1_INP') {
-              sendEjsInput(0, d.b, d.v);
+            if (d.t === 'S' && d.b) {
+              applyIncomingState(d.b);
             }
           });
+
+          dataConn.on('error', (err) => logScreen(`DataConn помилка: ${err}`, "err"));
         });
+
+        peer.on('error', (err) => logScreen(`Peer P2: ${err.type}`, "err"));
       }
     }
 
-    function sendFullInitialState() {
+    // Стрім повного стейту (кожні 50 мс)
+    function broadcastFullState() {
       if (!dataConn || !dataConn.open) return;
       try {
         const emu = window.EJS_emulator;
         if (emu?.gameManager?.getState) {
-          const st = emu.gameManager.getState();
-          if (st) {
-            dataConn.send({ t: 'INIT_STATE', b: st });
-            logScreen("Стартовий стейт передано P2", "info");
+          const state = emu.gameManager.getState();
+          if (state && state.length > 0) {
+            dataConn.send({ t: 'S', b: state });
           }
         }
-      } catch(e) {}
+      } catch (e) {}
     }
 
-    function streamFastRam() {
-      if (!dataConn || !dataConn.open) return;
-      const ram = getRawNesRam();
-      if (ram) {
-        dataConn.send({ t: 'RAM', b: ram });
-      }
+    function applyIncomingState(buffer) {
+      try {
+        const emu = window.EJS_emulator;
+        if (emu?.gameManager?.loadState) {
+          emu.gameManager.loadState(new Uint8Array(buffer));
+        }
+      } catch (e) {}
     }
 
-    // Обробка тапу
+    // Обробка кнопок
     function handleButtonAction(btnId, isDown) {
       const val = isDown ? 1 : 0;
 
       if (isGuest) {
-        sendEjsInput(1, btnId, val);
+        // P2 шле інпут хосту
         if (dataConn && dataConn.open) {
           dataConn.send({ t: 'INP', b: btnId, v: val });
+          logScreen(`P2 надіслав: btn=${btnId} val=${val}`);
+        } else {
+          logScreen("DataChannel не готовий!", "warn");
         }
-        logScreen(`P2 тап -> btn=${btnId} val=${val}`);
       } else {
+        // Хост керує P1 локально
         sendEjsInput(0, btnId, val);
-        if (dataConn && dataConn.open) {
-          dataConn.send({ t: 'P1_INP', b: btnId, v: val });
-        }
-        logScreen(`P1 тап -> btn=${btnId} val=${val}`);
+        logScreen(`P1 тап: btn=${btnId} val=${val}`);
       }
     }
 
