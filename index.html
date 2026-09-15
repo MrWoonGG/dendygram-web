@@ -93,6 +93,11 @@
       background: #000;
     }
 
+    /* Підсилюємо яскравість і чіткість стріму для клієнта */
+    #remote-stream-video {
+      filter: contrast(1.12) brightness(1.08) saturate(1.1);
+    }
+
     #game .ejs_virtual_gamepad,
     #game .ejs_menu,
     #game .ejs_start_screen,
@@ -257,7 +262,7 @@
         <div id="waiting-overlay">
           <div class="spinner"></div>
           <div id="overlay-msg" style="font-weight: 700; font-size: 14px; margin-bottom: 6px;">ПІДКЛЮЧЕННЯ ДО ХОСТА...</div>
-          <div id="overlay-sub" style="color: #71717a; font-size: 11px;">Отримуємо 30 FPS стрім...</div>
+          <div id="overlay-sub" style="color: #71717a; font-size: 11px;">Синхронізуємо 30 FPS відеопотік...</div>
         </div>
       </div>
       <div class="brand">DENDYGRAM • PORTABLE</div>
@@ -267,25 +272,25 @@
       <div class="main-pads">
         <div class="dpad">
           <div class="dpad-center"></div>
-          <div class="dpad-btn dpad-up" data-act="UP"></div>
-          <div class="dpad-btn dpad-down" data-act="DOWN"></div>
-          <div class="dpad-btn dpad-left" data-act="LEFT"></div>
-          <div class="dpad-btn dpad-right" data-act="RIGHT"></div>
+          <div class="dpad-btn dpad-up" data-btn="4"></div>
+          <div class="dpad-btn dpad-down" data-btn="5"></div>
+          <div class="dpad-btn dpad-left" data-btn="6"></div>
+          <div class="dpad-btn dpad-right" data-btn="7"></div>
         </div>
 
         <div class="action-buttons">
-          <div class="action-btn" data-act="B">B</div>
-          <div class="action-btn" data-act="A">A</div>
+          <div class="action-btn" data-btn="0">B</div>
+          <div class="action-btn" data-btn="8">A</div>
         </div>
       </div>
 
       <div class="system-pads">
         <div class="sys-btn-wrap">
-          <div class="sys-btn" data-act="SELECT"></div>
+          <div class="sys-btn" data-btn="2"></div>
           <span class="sys-label">SELECT</span>
         </div>
         <div class="sys-btn-wrap">
-          <div class="sys-btn" data-act="START"></div>
+          <div class="sys-btn" data-btn="3"></div>
           <span class="sys-label">START</span>
         </div>
       </div>
@@ -354,50 +359,19 @@
       }
     };
 
-    // Розкладка кнопок RetroArch
-    const p1Keys = {
-      B:      { key: 'z',          code: 'KeyZ',        keyCode: 90 },
-      A:      { key: 'x',          code: 'KeyX',        keyCode: 88 },
-      SELECT: { key: 'Shift',      code: 'ShiftRight',  keyCode: 16 },
-      START:  { key: 'Enter',      code: 'Enter',       keyCode: 13 },
-      UP:     { key: 'ArrowUp',    code: 'ArrowUp',     keyCode: 38 },
-      DOWN:   { key: 'ArrowDown',  code: 'ArrowDown',   keyCode: 40 },
-      LEFT:   { key: 'ArrowLeft',  code: 'ArrowLeft',   keyCode: 37 },
-      RIGHT:  { key: 'ArrowRight', code: 'ArrowRight',  keyCode: 39 }
-    };
+    // --- ПРЯМА ВІДПРАВКА В RETROARCH ЗА ЗНАЙДЕНИМИ ІНДЕКСАМИ ---
+    function sendEjsInput(port, btnId, val) {
+      try {
+        if (window.EJS_emulator?.controls?.simulateButton) {
+          window.EJS_emulator.controls.simulateButton(port, btnId, val);
+        }
+      } catch (e) {}
 
-    const p2Keys = {
-      B:      { key: 'q',          code: 'KeyQ',        keyCode: 81 },
-      A:      { key: 'e',          code: 'KeyE',        keyCode: 69 },
-      SELECT: { key: 't',          code: 'KeyT',        keyCode: 84 },
-      START:  { key: 'y',          code: 'KeyY',        keyCode: 89 },
-      UP:     { key: 'i',          code: 'KeyI',        keyCode: 73 },
-      DOWN:   { key: 'k',          code: 'KeyK',        keyCode: 75 },
-      LEFT:   { key: 'j',          code: 'KeyJ',        keyCode: 74 },
-      RIGHT:  { key: 'l',          code: 'KeyL',        keyCode: 76 }
-    };
-
-    function triggerKeyboard(targetKeyMeta, type) {
-      if (!targetKeyMeta) return;
-
-      const event = new KeyboardEvent(type, {
-        key: targetKeyMeta.key,
-        code: targetKeyMeta.code,
-        keyCode: targetKeyMeta.keyCode,
-        which: targetKeyMeta.keyCode,
-        bubbles: true,
-        cancelable: true,
-        composed: true,
-        view: window
-      });
-
-      const canvas = document.querySelector('#game canvas');
-      if (canvas) {
-        canvas.focus();
-        canvas.dispatchEvent(event);
-      }
-      window.dispatchEvent(event);
-      document.dispatchEvent(event);
+      try {
+        if (window.EJS_emulator?.gameManager?.setInputValue) {
+          window.EJS_emulator.gameManager.setInputValue(port, btnId, val);
+        }
+      } catch (e) {}
     }
 
     let peer = null;
@@ -413,6 +387,7 @@
         }
       } catch (e) {}
 
+      // Ініціалізація EJS
       window.EJS_player = '#game';
       window.EJS_core = 'nes';
       window.EJS_gameUrl = targetRom;
@@ -423,6 +398,30 @@
       window.EJS_VirtualGamepadSettings = [0, 0];
       window.EJS_mouse = false;
       window.EJS_defaultPlayers = 2;
+
+      // ЯВНО РЕЄСТРУЄМО ДВОХ ГРАВЦІВ ЗА ДОКУМЕНТАЦІЄЮ!
+      window.EJS_defaultControls = {
+        0: {
+          0: { 'value': 'x', 'value2': 'BUTTON_2' }, // B
+          2: { 'value': 'v', 'value2': 'SELECT' },   // SELECT
+          3: { 'value': 'enter', 'value2': 'START' },// START
+          4: { 'value': 'up arrow', 'value2': 'DPAD_UP' },
+          5: { 'value': 'down arrow', 'value2': 'DPAD_DOWN' },
+          6: { 'value': 'left arrow', 'value2': 'DPAD_LEFT' },
+          7: { 'value': 'right arrow', 'value2': 'DPAD_RIGHT' },
+          8: { 'value': 'z', 'value2': 'BUTTON_1' }  // A
+        },
+        1: {
+          0: { 'value': 'q', 'value2': 'BUTTON_2' }, // B (P2)
+          2: { 'value': 't', 'value2': 'SELECT' },   // SELECT (P2)
+          3: { 'value': 'y', 'value2': 'START' },    // START (P2)
+          4: { 'value': 'i', 'value2': 'DPAD_UP' },
+          5: { 'value': 'k', 'value2': 'DPAD_DOWN' },
+          6: { 'value': 'j', 'value2': 'DPAD_LEFT' },
+          7: { 'value': 'l', 'value2': 'DPAD_RIGHT' },
+          8: { 'value': 'e', 'value2': 'BUTTON_1' }  // A (P2)
+        }
+      };
 
       const loader = document.createElement('script');
       loader.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
@@ -476,10 +475,10 @@
           dataConn = c;
           setBrandStatus("DENDYGRAM • P2 ONLINE!", "#22c55e");
 
+          // Отримуємо тапи P2 і тиснемо в ПОРТ 1 за мапою
           c.on('data', (d) => {
-            if (d && d.act && d.type) {
-              const meta = p2Keys[d.act];
-              triggerKeyboard(meta, d.type);
+            if (d && d.b !== undefined) {
+              sendEjsInput(1, d.b, d.v);
             }
           });
 
@@ -494,7 +493,6 @@
         if (canvas && canvas.width > 0 && window.EJS_emulator) {
           clearInterval(check);
 
-          // 30 FPS зменшує навантаження на кодек удвічі
           const stream = canvas.captureStream(30);
           const track = stream.getVideoTracks()[0];
 
@@ -512,7 +510,7 @@
                 if (videoSender) {
                   const params = videoSender.getParameters();
                   if (!params.encodings) params.encodings = [{}];
-                  params.encodings[0].maxBitrate = 2000000; // 2 Mbps для 30 FPS дає монолітну чіткість
+                  params.encodings[0].maxBitrate = 2500000;
                   params.encodings[0].maxFramerate = 30;
                   await videoSender.setParameters(params);
                 }
@@ -523,31 +521,33 @@
       }, 300);
     }
 
-    function sendAction(actionName, eventType) {
+    function handleInputPress(btnId, isDown) {
+      const val = isDown ? 1 : 0;
+
       if (roomId && isGuest) {
         if (dataConn && dataConn.open) {
-          dataConn.send({ act: actionName, type: eventType });
+          dataConn.send({ b: btnId, v: val });
         }
         return;
       }
 
-      const meta = p1Keys[actionName];
-      triggerKeyboard(meta, eventType);
+      // Хост керує ПОРТОМ 0
+      sendEjsInput(0, btnId, val);
     }
 
-    document.querySelectorAll('[data-act]').forEach(elem => {
-      const act = elem.getAttribute('data-act');
+    document.querySelectorAll('[data-btn]').forEach(elem => {
+      const btnId = parseInt(elem.getAttribute('data-btn'), 10);
 
       const down = (e) => {
         e.preventDefault();
         elem.classList.add('pressed');
-        sendAction(act, 'keydown');
+        handleInputPress(btnId, true);
       };
 
       const up = (e) => {
         e.preventDefault();
         elem.classList.remove('pressed');
-        sendAction(act, 'keyup');
+        handleInputPress(btnId, false);
       };
 
       elem.addEventListener('pointerdown', down);
