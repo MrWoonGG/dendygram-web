@@ -93,7 +93,6 @@
       background: #000;
     }
 
-    /* Підсилюємо яскравість і чіткість стріму для клієнта */
     #remote-stream-video {
       filter: contrast(1.12) brightness(1.08) saturate(1.1);
     }
@@ -262,7 +261,7 @@
         <div id="waiting-overlay">
           <div class="spinner"></div>
           <div id="overlay-msg" style="font-weight: 700; font-size: 14px; margin-bottom: 6px;">ПІДКЛЮЧЕННЯ ДО ХОСТА...</div>
-          <div id="overlay-sub" style="color: #71717a; font-size: 11px;">Синхронізуємо 30 FPS відеопотік...</div>
+          <div id="overlay-sub" style="color: #71717a; font-size: 11px;">Отримуємо потік гри...</div>
         </div>
       </div>
       <div class="brand">DENDYGRAM • PORTABLE</div>
@@ -359,24 +358,19 @@
       }
     };
 
-    // --- ПРЯМА ВІДПРАВКА В RETROARCH ЗА ЗНАЙДЕНИМИ ІНДЕКСАМИ ---
+    let peer = null;
+    let dataConn = null;
+    const hostPeerId = `dendygram_fast_stream_${roomId}`;
+
     function sendEjsInput(port, btnId, val) {
       try {
         if (window.EJS_emulator?.controls?.simulateButton) {
           window.EJS_emulator.controls.simulateButton(port, btnId, val);
-        }
-      } catch (e) {}
-
-      try {
-        if (window.EJS_emulator?.gameManager?.setInputValue) {
+        } else if (window.EJS_emulator?.gameManager?.setInputValue) {
           window.EJS_emulator.gameManager.setInputValue(port, btnId, val);
         }
       } catch (e) {}
     }
-
-    let peer = null;
-    let dataConn = null;
-    const hostPeerId = `dendygram_fast_stream_${roomId}`;
 
     function startHostEmulator() {
       try {
@@ -387,7 +381,6 @@
         }
       } catch (e) {}
 
-      // Ініціалізація EJS
       window.EJS_player = '#game';
       window.EJS_core = 'nes';
       window.EJS_gameUrl = targetRom;
@@ -397,29 +390,11 @@
       window.EJS_disableToolbar = true;
       window.EJS_VirtualGamepadSettings = [0, 0];
       window.EJS_mouse = false;
-      window.EJS_defaultPlayers = 2;
 
-      // ЯВНО РЕЄСТРУЄМО ДВОХ ГРАВЦІВ ЗА ДОКУМЕНТАЦІЄЮ!
-      window.EJS_defaultControls = {
-        0: {
-          0: { 'value': 'x', 'value2': 'BUTTON_2' }, // B
-          2: { 'value': 'v', 'value2': 'SELECT' },   // SELECT
-          3: { 'value': 'enter', 'value2': 'START' },// START
-          4: { 'value': 'up arrow', 'value2': 'DPAD_UP' },
-          5: { 'value': 'down arrow', 'value2': 'DPAD_DOWN' },
-          6: { 'value': 'left arrow', 'value2': 'DPAD_LEFT' },
-          7: { 'value': 'right arrow', 'value2': 'DPAD_RIGHT' },
-          8: { 'value': 'z', 'value2': 'BUTTON_1' }  // A
-        },
-        1: {
-          0: { 'value': 'q', 'value2': 'BUTTON_2' }, // B (P2)
-          2: { 'value': 't', 'value2': 'SELECT' },   // SELECT (P2)
-          3: { 'value': 'y', 'value2': 'START' },    // START (P2)
-          4: { 'value': 'i', 'value2': 'DPAD_UP' },
-          5: { 'value': 'k', 'value2': 'DPAD_DOWN' },
-          6: { 'value': 'j', 'value2': 'DPAD_LEFT' },
-          7: { 'value': 'l', 'value2': 'DPAD_RIGHT' },
-          8: { 'value': 'e', 'value2': 'BUTTON_1' }  // A (P2)
+      window.EJS_onGameStart = function() {
+        console.log("Емулятор готовий до гри!");
+        if (roomId && peer && dataConn) {
+          streamCanvasWithHardwareFps(dataConn.peer);
         }
       };
 
@@ -429,6 +404,7 @@
     }
 
     if (roomId && isGuest) {
+      // === PLAYER 2 (КЛІЄНТ СТРІМУ) ===
       setBrandStatus("DENDYGRAM • DUO (P2)", "#34d399");
       waitingOverlay.style.display = 'flex';
 
@@ -460,11 +436,12 @@
         call.answer();
         call.on('stream', (stream) => {
           video.srcObject = stream;
-          video.play().catch(e => console.warn("Play blocked:", e));
+          video.play().catch(e => console.warn("Autoplay block:", e));
         });
       });
 
     } else {
+      // === ХОСТ (P1) АБО СОЛО ===
       setBrandStatus(roomId ? "DENDYGRAM • DUO (HOST)" : "DENDYGRAM • SOLO", "#38bdf8");
       startHostEmulator();
 
@@ -475,7 +452,6 @@
           dataConn = c;
           setBrandStatus("DENDYGRAM • P2 ONLINE!", "#22c55e");
 
-          // Отримуємо тапи P2 і тиснемо в ПОРТ 1 за мапою
           c.on('data', (d) => {
             if (d && d.b !== undefined) {
               sendEjsInput(1, d.b, d.v);
@@ -490,7 +466,7 @@
     function streamCanvasWithHardwareFps(targetPeerId) {
       const check = setInterval(() => {
         const canvas = document.querySelector('#game canvas');
-        if (canvas && canvas.width > 0 && window.EJS_emulator) {
+        if (canvas && canvas.width > 100 && window.EJS_emulator) {
           clearInterval(check);
 
           const stream = canvas.captureStream(30);
@@ -531,7 +507,6 @@
         return;
       }
 
-      // Хост керує ПОРТОМ 0
       sendEjsInput(0, btnId, val);
     }
 
