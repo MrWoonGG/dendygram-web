@@ -6,7 +6,7 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>DendyGram 30FPS Low-Latency</title>
+  <title>DendyGram Ultra Tuned 10/10</title>
   
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -87,7 +87,12 @@
 
     #cloud-video {
       display: none;
+      /* Додано соковитості, яскравості та піксельної чіткості */
+      filter: brightness(1.15) contrast(1.12) saturate(1.15);
+      image-rendering: -moz-crisp-edges !important;
+      image-rendering: -webkit-crisp-edges !important;
       image-rendering: pixelated !important;
+      image-rendering: crisp-edges !important;
     }
 
     #game canvas {
@@ -95,6 +100,7 @@
       width: 100% !important;
       height: 100% !important;
       object-fit: contain !important;
+      filter: brightness(1.08) contrast(1.08);
       image-rendering: pixelated !important;
     }
 
@@ -336,11 +342,11 @@
         <div id="waiting-overlay">
           <div class="spinner"></div>
           <div id="overlay-msg" style="font-weight: 700; font-size: 14px; margin-bottom: 6px;">ПІДКЛЮЧЕННЯ...</div>
-          <div id="overlay-sub" style="color: #71717a; font-size: 11px;">Очікування 30 FPS стріму...</div>
+          <div id="overlay-sub" style="color: #71717a; font-size: 11px;">Синхронізація ультра-стріму...</div>
           <button id="play-trigger-btn">▶ УВІЙТИ В ГРУ</button>
         </div>
       </div>
-      <div class="brand">DENDYGRAM • 30 FPS CLOUD</div>
+      <div class="brand">DENDYGRAM • LOW-LATENCY 10/10</div>
     </div>
 
     <div class="logger-wrapper">
@@ -449,21 +455,11 @@
     const overlayMsg = document.getElementById('overlay-msg');
     const overlaySub = document.getElementById('overlay-sub');
 
-    // ==========================================
-    // ЛОГУВАННЯ СТАТУСІВ ВІДЕОПЛЕЄРА ГОСТЯ
-    // ==========================================
     if (cloudVideo) {
-      cloudVideo.addEventListener('loadedmetadata', () => {
-        logScreen(`Відео: metadata (${cloudVideo.videoWidth}x${cloudVideo.videoHeight})`, "info");
-      });
       cloudVideo.addEventListener('playing', () => {
-        logScreen("Відео: рендер почався (PLAYING)", "info");
         waitingOverlay.style.display = 'none';
-        setBrandStatus("DENDYGRAM • 30 FPS LIVE", "#22c55e");
+        setBrandStatus("DENDYGRAM • LOW-LATENCY 10/10", "#22c55e");
       });
-      cloudVideo.addEventListener('waiting', () => logScreen("Відео: очікування буфера...", "warn"));
-      cloudVideo.addEventListener('stalled', () => logScreen("Відео: потік завис (stalled)", "warn"));
-      cloudVideo.addEventListener('error', (e) => logScreen(`Відео err: ${cloudVideo.error?.message}`, "err"));
     }
 
     // ==========================================
@@ -545,7 +541,7 @@
 
     let peer = null;
     let dataConn = null;
-    const hostPeerId = `dendygram_30fps_${roomId}`;
+    const hostPeerId = `dendygram_10out10_${roomId}`;
 
     if (roomId && isGuest) {
       // === P2 GUEST ===
@@ -555,14 +551,12 @@
       waitingOverlay.style.display = 'flex';
 
       function forcePlayVideo() {
-        logScreen("Ручний запуск відео...", "info");
-        cloudVideo.muted = true; // стартуємо з muted для гарантованого пробиття автоплею
+        cloudVideo.muted = true;
         cloudVideo.play().then(() => {
           waitingOverlay.style.display = 'none';
-          cloudVideo.muted = false; // вмикаємо звук після розблокування
-          logScreen("Відео грає!", "info");
+          cloudVideo.muted = false;
         }).catch(err => {
-          logScreen(`Play помилка: ${err.message}`, "err");
+          logScreen(`Play err: ${err.message}`, "err");
         });
       }
       playTriggerBtn.addEventListener('click', forcePlayVideo);
@@ -579,14 +573,13 @@
       });
 
       peer.on('call', (call) => {
-        logScreen("Отримано виклик потоку! Підключаємо...", "info");
         call.answer();
 
         if (call.peerConnection) {
           call.peerConnection.ontrack = (event) => {
-            logScreen(`Track отримано: kind=${event.track.kind}`, "info");
             if (event.receiver) {
               try {
+                // Агресивне вбивство джитер-буфера
                 if ('playoutDelayHint' in event.receiver) event.receiver.playoutDelayHint = 0;
                 if ('jitterBufferTarget' in event.receiver) event.receiver.jitterBufferTarget = 0;
               } catch(e) {}
@@ -598,20 +591,16 @@
         }
 
         call.on('stream', (remoteStream) => {
-          logScreen(`Stream прибув: tracks=${remoteStream.getTracks().length}`, "info");
           cloudVideo.srcObject = remoteStream;
-
-          // Спроба автоматичного старту
           cloudVideo.play().then(() => {
             waitingOverlay.style.display = 'none';
-            setBrandStatus("DENDYGRAM • 30 FPS LIVE", "#22c55e");
-            logScreen("Автоплей 30 FPS успішний!", "info");
-          }).catch((err) => {
-            logScreen(`Автоплей блок (${err.name}). Тисни кнопку!`, "warn");
+            setBrandStatus("DENDYGRAM • LOW-LATENCY 10/10", "#22c55e");
+            logScreen("30 FPS стрім активний!", "info");
+          }).catch(() => {
             const spinner = document.querySelector('.spinner');
             if (spinner) spinner.style.display = 'none';
             overlayMsg.textContent = "ПОТІК ГОТОВИЙ!";
-            overlaySub.textContent = "Натисни кнопку нижче для запуску гри";
+            overlaySub.textContent = "Торкнись кнопки для активації гри";
             playTriggerBtn.style.display = 'block';
           });
         });
@@ -666,7 +655,7 @@
             }
           });
 
-          initFastStream(c.peer);
+          initStream10Out10(c.peer);
         });
 
         peer.on('error', (err) => logScreen(`Peer хоста: ${err.type}`, "err"));
@@ -674,18 +663,17 @@
     }
 
     // ==========================================
-    // СТРІМ НА 30 FPS З МІНІМАЛЬНИМ ПІНГОМ
+    // СТРІМ ІЗ МІНІМАЛЬНИМ ІНПУТ-ЛАГОМ
     // ==========================================
-    function initFastStream(guestId) {
+    function initStream10Out10(guestId) {
       let tries = 0;
       const t = setInterval(() => {
         tries++;
         const canvas = document.querySelector('#game canvas');
         if (canvas && canvas.width > 50) {
           clearInterval(t);
-          logScreen(`Канвас (${canvas.width}x${canvas.height}). Формуємо 30 FPS стрім...`, "info");
+          logScreen(`Канвас (${canvas.width}x${canvas.height}). Формуємо потік...`, "info");
           try {
-            // Фіксуємо 30 FPS для меншого навантаження
             const stream = canvas.captureStream(30);
             const vTrack = stream.getVideoTracks()[0];
             if (vTrack && 'contentHint' in vTrack) {
@@ -703,17 +691,19 @@
                   if (vSender) {
                     const p = vSender.getParameters();
                     if (!p.encodings) p.encodings = [{}];
-                    p.encodings[0].maxBitrate = 1200000; // 1.2 Mbps для 30 FPS — кадри вилітають миттєво
+                    p.encodings[0].maxBitrate = 1400000;
                     p.encodings[0].maxFramerate = 30;
                     p.encodings[0].priority = 'high';
                     p.encodings[0].networkPriority = 'high';
+                    // Пріоритет частоти без затримки кадрів
+                    p.degradationPreference = 'maintain-framerate';
                     await vSender.setParameters(p);
                   }
                 } catch(e) {}
               });
             }
 
-            logScreen("30 FPS стрім передано гостю!", "info");
+            logScreen("Стрім 10/10 передано гостю!", "info");
           } catch(e) {
             logScreen(`Помилка captureStream: ${e.message}`, "err");
           }
@@ -726,7 +716,7 @@
     }
 
     // ==========================================
-    // ОБРОБКА КНОПОК
+    // КНОПКИ
     // ==========================================
     function handleButtonAction(btnId, isDown) {
       const val = isDown ? 1 : 0;
