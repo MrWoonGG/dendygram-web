@@ -6,26 +6,8 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>DendyGram RAM & Audio Stream</title>
+  <title>DendyGram Smooth Sync</title>
   
-  <script>
-    // ПЕРЕХОПЛЕННЯ АУДІОКОНТЕКСТУ ДЛЯ СТРІМУ ЗВУКУ З ХОСТА
-    window.__hostAudioStream = null;
-    const OrigAudioCtx = window.AudioContext || window.webkitAudioContext;
-    if (OrigAudioCtx) {
-      window.AudioContext = window.webkitAudioContext = function() {
-        const ctx = new OrigAudioCtx();
-        try {
-          const dest = ctx.createMediaStreamDestination();
-          // Підключаємо вихід емулятора до нашого MediaStream для WebRTC
-          ctx.destination.connect(dest);
-          window.__hostAudioStream = dest.stream;
-        } catch (e) {}
-        return ctx;
-      };
-    }
-  </script>
-
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   
@@ -406,62 +388,71 @@
     setBrandStatus(`DENDYGRAM • ${isGuest ? 'P2 (GUEST)' : 'P1 (HOST)'}`, isGuest ? '#34d399' : '#38bdf8');
     logScreen(`Роль: ${isGuest ? 'P2' : 'P1'} | Кімната: ${roomId || 'Соло'}`);
 
-    // --- КЛАВІШІ ДЛЯ ДВОХ ГРАВЦІВ ---
-    const p1Keys = {
-      0: { code: 'KeyZ', key: 'z', keyCode: 90 },
-      8: { code: 'KeyX', key: 'x', keyCode: 88 },
-      2: { code: 'ShiftRight', key: 'Shift', keyCode: 16 },
-      3: { code: 'Enter', key: 'Enter', keyCode: 13 },
-      4: { code: 'ArrowUp', key: 'ArrowUp', keyCode: 38 },
-      5: { code: 'ArrowDown', key: 'ArrowDown', keyCode: 40 },
-      6: { code: 'ArrowLeft', key: 'ArrowLeft', keyCode: 37 },
-      7: { code: 'ArrowRight', key: 'ArrowRight', keyCode: 39 }
-    };
-
-    const p2Keys = {
-      0: { code: 'KeyQ', key: 'q', keyCode: 81 },
-      8: { code: 'KeyE', key: 'e', keyCode: 69 },
-      2: { code: 'KeyT', key: 't', keyCode: 84 },
-      3: { code: 'KeyY', key: 'y', keyCode: 89 },
-      4: { code: 'KeyI', key: 'i', keyCode: 73 },
-      5: { code: 'KeyK', key: 'k', keyCode: 75 },
-      6: { code: 'KeyJ', key: 'j', keyCode: 74 },
-      7: { code: 'KeyL', key: 'l', keyCode: 76 }
-    };
-
+    // --- БРОНЕБІЙНИЙ КОМБІНОВАНИЙ ІНПУТ ---
     function sendEjsInput(port, btnId, val) {
       const emu = window.EJS_emulator;
       let ok = false;
 
       // 1. Прямий виклик API емулятора
-      if (emu?.controls?.simulateButton) {
-        try {
+      try {
+        if (emu?.controls?.simulateButton) {
           emu.controls.simulateButton(port, btnId, val);
           ok = true;
-        } catch(e) {}
-      }
+        }
+        if (emu?.gameManager?.setInputValue) {
+          emu.gameManager.setInputValue(port, btnId, val);
+          ok = true;
+        }
+      } catch(e) {}
 
-      // 2. Синтетичні події клавіатури в канвас та window
-      const keyMap = (port === 1) ? p2Keys : p1Keys;
-      const keyInfo = keyMap[btnId];
-      if (keyInfo) {
-        const evType = val ? 'keydown' : 'keyup';
+      // 2. Якщо це SELECT (btnId === 2) — відправляємо повний веєр клавіш (ShiftLeft, ShiftRight, KeyV)
+      const evType = val ? 'keydown' : 'keyup';
+      const canvas = document.querySelector('#game canvas');
+
+      function fireKey(k, c, codeNum) {
         const ev = new KeyboardEvent(evType, {
-          key: keyInfo.key,
-          code: keyInfo.code,
-          keyCode: keyInfo.keyCode,
-          which: keyInfo.keyCode,
-          bubbles: true,
-          cancelable: true,
-          composed: true,
-          view: window
+          key: k, code: c, keyCode: codeNum, which: codeNum,
+          bubbles: true, cancelable: true, view: window
         });
-
-        const canvas = document.querySelector('#game canvas');
         if (canvas) canvas.dispatchEvent(ev);
         window.dispatchEvent(ev);
+      }
+
+      if (btnId === 2) {
+        // SELECT залп
+        fireKey('Shift', 'ShiftLeft', 16);
+        fireKey('Shift', 'ShiftRight', 16);
+        fireKey('v', 'KeyV', 86);
+        fireKey('Tab', 'Tab', 9);
+        ok = true;
+      } else if (btnId === 3) {
+        // START
+        fireKey('Enter', 'Enter', 13);
+        ok = true;
+      } else if (btnId === 0) {
+        // B
+        fireKey('z', 'KeyZ', 90);
+        fireKey('q', 'KeyQ', 81);
+        ok = true;
+      } else if (btnId === 8) {
+        // A
+        fireKey('x', 'KeyX', 88);
+        fireKey('e', 'KeyE', 69);
+        ok = true;
+      } else if (btnId === 4) {
+        fireKey('ArrowUp', 'ArrowUp', 38);
+        ok = true;
+      } else if (btnId === 5) {
+        fireKey('ArrowDown', 'ArrowDown', 40);
+        ok = true;
+      } else if (btnId === 6) {
+        fireKey('ArrowLeft', 'ArrowLeft', 37);
+        ok = true;
+      } else if (btnId === 7) {
+        fireKey('ArrowRight', 'ArrowRight', 39);
         ok = true;
       }
+
       return ok;
     }
 
@@ -485,11 +476,6 @@
     window.EJS_VirtualGamepadSettings = [0, 0];
     window.EJS_mouse = false;
 
-    // Глушимо локальний звук на P2, щоб уникнути тріску від savestate
-    if (isGuest) {
-      window.EJS_volume = 0;
-    }
-
     const loader = document.createElement('script');
     loader.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
     loader.async = true;
@@ -497,7 +483,7 @@
     loader.onerror = () => logScreen("CDN loader.js недоступний!", "err");
     document.head.appendChild(loader);
 
-    // --- P2P МЕРЕЖА (DATA + AUDIO STREAM) ---
+    // --- P2P МЕРЕЖА ТА ПЛАВНА СИНХРОНІЗАЦІЯ ---
     const meteredIceServers = [
       { urls: "stun:stun.relay.metered.ca:80" },
       { urls: "turn:global.relay.metered.ca:80", username: "d7695a22150cfea32f5b287e", credential: "Jm8+83G3JIEbY+Dj" },
@@ -507,7 +493,7 @@
     let peer = null;
     let dataConn = null;
     let streamInterval = null;
-    let guestPeerId = null;
+    let lastStateBuffer = null;
     const hostPeerId = `dendygram_ram_${roomId}`;
 
     if (roomId) {
@@ -519,24 +505,19 @@
 
         peer.on('connection', (c) => {
           dataConn = c;
-          guestPeerId = c.peer;
           setBrandStatus("DENDYGRAM • DUO ONLINE!", "#22c55e");
-          logScreen("P2 зайшов! Стрім RAM та звуку активовано", "info");
+          logScreen("P2 зайшов! Плавну синхронізацію активовано", "info");
 
-          // Обробка кнопок від P2
           c.on('data', (d) => {
             if (d.t === 'INP') {
               const res = sendEjsInput(1, d.b, d.v);
-              logScreen(`P2 TAP -> btn=${d.b} val=${d.v} (${res ? 'OK' : 'FAIL'})`);
+              logScreen(`P2 TAP -> btn=${d.b} val=${d.v}`);
             }
           });
 
-          // Стрім RAM кожні 150 мс
+          // Синхронізуємо раз на 250 мс і ТІЛЬКИ ЯКЩО стан реально змінився
           if (streamInterval) clearInterval(streamInterval);
-          streamInterval = setInterval(broadcastState, 150);
-
-          // Стрім аудіо гостю через WebRTC
-          startAudioCall(c.peer);
+          streamInterval = setInterval(broadcastStateDiff, 250);
         });
 
       } else {
@@ -545,12 +526,11 @@
 
         peer.on('open', () => {
           logScreen("P2 ініціалізовано, підключення до хоста...", "info");
-          // reliable: true гарантує 100% доставку кожного тапа
           dataConn = peer.connect(hostPeerId, { reliable: true });
 
           dataConn.on('open', () => {
             setBrandStatus("DENDYGRAM • DUO ONLINE!", "#22c55e");
-            logScreen("Канал зв'язку відкрито! Керування активне", "info");
+            logScreen("Канал зв'язку відкрито!", "info");
           });
 
           dataConn.on('data', (d) => {
@@ -561,53 +541,35 @@
 
           dataConn.on('error', (err) => logScreen(`Помилка каналу: ${err}`, "err"));
         });
-
-        // Приймаємо дзвінок з аудіотреком від хоста
-        peer.on('call', (call) => {
-          logScreen("Отримано аудіопотік хоста!", "info");
-          call.answer();
-          call.on('stream', (remoteAudioStream) => {
-            logScreen("Відтворюємо плавний 8-бітний звук", "info");
-            const audio = new Audio();
-            audio.srcObject = remoteAudioStream;
-            audio.autoplay = true;
-            audio.play().catch(e => logScreen("Audio autoplay err: " + e.message, "warn"));
-          });
-        });
       }
     }
 
-    // Дзвінок хоста з передачею звуку
-    function startAudioCall(targetId) {
-      let tries = 0;
-      const checkAudio = setInterval(() => {
-        tries++;
-        if (window.__hostAudioStream) {
-          clearInterval(checkAudio);
-          logScreen("Звуковий потік знайдено, дзвінок P2...", "info");
-          peer.call(targetId, window.__hostAudioStream);
-        } else if (tries > 30) {
-          clearInterval(checkAudio);
-          logScreen("Таймаут захоплення аудіо", "warn");
-        }
-      }, 300);
+    // Розумне порівняння стейтів (щоб не смикати рендер даремно)
+    function areBuffersEqual(buf1, buf2) {
+      if (!buf1 || !buf2 || buf1.length !== buf2.length) return false;
+      for (let i = 0; i < buf1.length; i += 16) { // швидкий крок по 16 байт
+        if (buf1[i] !== buf2[i]) return false;
+      }
+      return true;
     }
 
-    // Стрім RAM-пам'яті
-    function broadcastState() {
+    function broadcastStateDiff() {
       if (!dataConn || !dataConn.open) return;
       try {
         const emu = window.EJS_emulator;
         if (emu?.gameManager?.getState) {
           const state = emu.gameManager.getState();
           if (state && state.length > 0) {
-            dataConn.send({ t: 'S', b: state });
+            // Перевіряємо чи змінився стан
+            if (!lastStateBuffer || !areBuffersEqual(lastStateBuffer, state)) {
+              lastStateBuffer = new Uint8Array(state);
+              dataConn.send({ t: 'S', b: state });
+            }
           }
         }
       } catch (e) {}
     }
 
-    // Застосування сейвстейту на гості
     function applyIncomingState(buffer) {
       try {
         const emu = window.EJS_emulator;
@@ -626,8 +588,6 @@
         if (dataConn && dataConn.open) {
           dataConn.send({ t: 'INP', b: btnId, v: val });
           logScreen(`P2 тап -> btn=${btnId} val=${val}`);
-        } else {
-          logScreen("Зв'язок із хостом відсутній!", "warn");
         }
       } else {
         // Хост керує P1 локально
